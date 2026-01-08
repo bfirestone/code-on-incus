@@ -153,6 +153,6 @@ def test_slot_assignments_are_reasonable():
 
     if issues:
         issue_msg = "\n  ".join(issues)
-        assert False, f"Slot assignment issues found:\n  {issue_msg}"
+        raise AssertionError(f"Slot assignment issues found:\n  {issue_msg}")
 
     print(f"\n✓ All {len(all_slots)} slot assignments are in reasonable range (1-99)")

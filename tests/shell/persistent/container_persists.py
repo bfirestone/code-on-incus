@@ -41,7 +41,7 @@ def test_persistent_container_not_deleted(coi_binary, cleanup_containers, worksp
 
     with with_live_screen(child) as monitor:
         time.sleep(2)
-        send_prompt(child, "Print ONLY result of sum of 100 and 200 and NOTHING ELSE")
+        send_prompt(child, "Print 20 times ONLY result of sum of 100 and 200 and NOTHING ELSE")
         responded = wait_for_text_in_monitor(monitor, "300", timeout=30)
         assert responded, "Claude did not respond"
 

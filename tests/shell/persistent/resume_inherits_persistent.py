@@ -49,7 +49,7 @@ def test_persistent_resume_inherits_persistent_mode(coi_binary, cleanup_containe
 
     with with_live_screen(child1) as monitor1:
         time.sleep(2)
-        send_prompt(child1, "Print ONLY result of sum of 5000 and 7000 and NOTHING ELSE")
+        send_prompt(child1, "Print 20 times ONLY result of sum of 5000 and 7000 and NOTHING ELSE")
         responded = wait_for_text_in_monitor(monitor1, "12000", timeout=30)
         assert responded, "Claude did not respond in first session"
 
@@ -76,7 +76,7 @@ def test_persistent_resume_inherits_persistent_mode(coi_binary, cleanup_containe
 
         with with_live_screen(child2) as monitor2:
             time.sleep(2)
-            send_prompt(child2, "Print ONLY result of sum of 8000 and 9000 and NOTHING ELSE")
+            send_prompt(child2, "Print 20 times ONLY result of sum of 8000 and 9000 and NOTHING ELSE")
             responded = wait_for_text_in_monitor(monitor2, "17000", timeout=30)
             assert responded, "Claude did not respond in resumed session"
 
