@@ -439,6 +439,84 @@ def exit_claude(child, timeout=60):
         return False
 
 
+def wait_for_container_deletion(prefix="coi-test-", timeout=30, poll_interval=0.5):
+    """
+    Wait for all containers matching prefix to be deleted.
+
+    This is useful after exit_claude() to ensure the container cleanup
+    completes before the monitor stops. The coi process exits quickly,
+    but Incus container deletion happens asynchronously.
+
+    Uses the same clear-screen technique as LiveScreenMonitor to provide
+    a seamless visual experience.
+
+    Args:
+        prefix: Container name prefix to wait for (default: "coi-test-")
+        timeout: Maximum time to wait in seconds (default: 30)
+        poll_interval: How often to check in seconds (default: 0.5)
+
+    Returns:
+        True if all containers deleted, False if timeout
+
+    Example:
+        clean_exit = exit_claude(child)
+        wait_for_container_deletion()  # Wait for cleanup
+        assert_clean_exit(clean_exit, child)
+    """
+    import sys
+
+    start_time = time.time()
+    last_display = None
+
+    while time.time() - start_time < timeout:
+        containers = get_container_list()
+        matching = [c for c in containers if c.startswith(prefix)]
+
+        if len(matching) == 0:
+            # All containers deleted - clear screen and show completion
+            print("\033[2J\033[H", end="", file=sys.stderr)  # Clear screen
+            print("✓ Container cleanup complete\n", file=sys.stderr)
+            sys.stderr.flush()
+            time.sleep(0.5)  # Brief pause so user can see the message
+            return True
+
+        # Build status display (like monitor does)
+        elapsed = int(time.time() - start_time)
+        status = f"""
+Container Cleanup Status
+{'=' * 40}
+
+⏳ Waiting for container deletion...
+
+Containers remaining: {len(matching)}
+Elapsed time: {elapsed}s / {timeout}s
+
+{chr(10).join(f'  - {c}' for c in matching)}
+"""
+
+        # Only update display if it changed (like monitor does)
+        if status != last_display:
+            print("\033[2J\033[H", end="", file=sys.stderr)  # Clear screen
+            print(status, file=sys.stderr)
+            sys.stderr.flush()
+            last_display = status
+
+        time.sleep(poll_interval)
+
+    # Timeout - some containers still exist
+    containers = get_container_list()
+    matching = [c for c in containers if c.startswith(prefix)]
+    if matching:
+        print("\033[2J\033[H", end="", file=sys.stderr)  # Clear screen
+        print(
+            f"⚠️ Timeout: {len(matching)} container(s) still exist:\n{chr(10).join(f'  - {c}' for c in matching)}\n",
+            file=sys.stderr,
+        )
+        sys.stderr.flush()
+
+    return False
+
+
 def assert_clean_exit(clean_exit, child):
     """
     Assert that Claude exited cleanly with exit code 0.
@@ -455,6 +533,7 @@ def assert_clean_exit(clean_exit, child):
 
     Example:
         clean_exit = exit_claude(child)
+        wait_for_container_deletion()  # Optional: wait for cleanup
         assert_clean_exit(clean_exit, child)
     """
     assert clean_exit, "Claude did not exit cleanly (timeout/force kill)"
@@ -842,9 +921,9 @@ class LiveScreenMonitor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit - stop monitoring."""
-        # Give one last screen refresh for debugging
-        time.sleep(1)
-        self.stop()
+        # Don't print "Monitor stopped" message - it's confusing when
+        # we're still waiting for container cleanup
+        self.stop(show_message=False)
         return False  # Don't suppress exceptions
 
     def start(self):
@@ -855,12 +934,12 @@ class LiveScreenMonitor:
         if self.show_startup:
             print("\n🔴 Live monitor started\n", file=sys.stderr)
 
-    def stop(self):
+    def stop(self, show_message=True):
         """Stop the background monitor thread."""
         self.running = False
         if self.thread:
             self.thread.join(timeout=2)
-        if self.show_startup:
+        if self.show_startup and show_message:
             print("\n⚫ Monitor stopped\n", file=sys.stderr)
 
     def _monitor_loop(self):
