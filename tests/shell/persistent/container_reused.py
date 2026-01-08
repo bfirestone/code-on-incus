@@ -52,7 +52,7 @@ def test_persistent_container_reused_with_state(coi_binary, cleanup_containers, 
             child1,
             "mkdir -p ~/persist_test && echo 'persistent-data-12345' > ~/persist_test/data.txt",
         )
-        send_prompt(child1, "Print ONLY result of sum of 10000 and 10000 and NOTHING ELSE")
+        send_prompt(child1, "Print 20 times ONLY result of sum of 10000 and 10000 and NOTHING ELSE")
         home_written = wait_for_text_in_monitor(monitor1, "20000", timeout=30)
         assert home_written, "Failed to write test file to /home/claude"
 
@@ -96,7 +96,7 @@ def test_persistent_container_reused_with_state(coi_binary, cleanup_containers, 
         # Check if home directory file persisted with correct content
         send_prompt(
             child2,
-            "CHECK IF /home/claude/persist_test/data.txt exists and print ONLY result of 15000+15000 if YES AND NOTHING ELSE",
+            "CHECK IF /home/claude/persist_test/data.txt exists and print 20 times ONLY result of 15000+15000 if YES AND NOTHING ELSE",
         )
         home_persisted = wait_for_text_in_monitor(monitor2, "30000", timeout=30)
         assert home_persisted, (

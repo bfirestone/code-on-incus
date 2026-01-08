@@ -80,10 +80,12 @@ def test_persistent_resume_inherits_persistent_mode(
     if session_id:
         child2 = spawn_coi(
             coi_binary,
-            ["shell", "--tmux=true", f"--resume={session_id}", "--slot=22"],
+            ["shell", "--tmux=true", f"--resume={session_id}"],
             cwd=workspace_dir,
         )
         wait_for_container_ready(child2)
+        # Give extra time for Claude to load from restored session
+        time.sleep(5)
         wait_for_prompt(child2)
 
         with with_live_screen(child2) as monitor2:
