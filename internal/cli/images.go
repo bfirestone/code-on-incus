@@ -140,7 +140,7 @@ func listAllImages() error {
 func formatSize(sizeStr string) string {
 	// Size is in bytes as string, convert to MB/GB
 	var bytes int64
-	fmt.Sscanf(sizeStr, "%d", &bytes)
+	_, _ = fmt.Sscanf(sizeStr, "%d", &bytes) // Ignore error, default to 0 if parse fails
 
 	if bytes < 1024 {
 		return fmt.Sprintf("%dB", bytes)

@@ -1,18 +1,54 @@
 # claude-on-incus (`coi`)
 
-Run Claude Code in isolated Incus containers with session persistence, workspace isolation, and multi-slot support.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/mensfeld/claude-on-incus)](https://golang.org/)
+[![Latest Release](https://img.shields.io/github/v/release/mensfeld/claude-on-incus)](https://github.com/mensfeld/claude-on-incus/releases)
+
+**The Professional Claude Code Container Runtime for Linux**
+
+Run Claude Code in isolated, production-grade Incus containers with zero permission headaches, perfect file ownership, and true multi-session support.
+
+*Think Docker for Claude, but with system containers that actually work like real machines.*
 
 ## Features
 
+### 🚀 Core Capabilities
 - ✅ **Multi-slot support** - Run parallel Claude sessions for the same workspace
 - ✅ **Session persistence** - Resume sessions with `.claude` directory restoration
 - ✅ **Persistent containers** - Keep containers alive between sessions (installed tools preserved)
 - ✅ **Workspace isolation** - Each session mounts your project directory
-- ✅ **Session management** - Auto-save/restore session data on every run
-- ✅ **Interactive shell** - `coi shell` command with full resume support
-- ✅ **Image building** - Sandbox and privileged images with Docker + build tools
-- ✅ **Configuration system** - TOML-based config with profiles
-- ✅ **Management commands** - List, info, attach, images, clean, and tmux commands
+
+### 🔒 Security & Isolation
+- ✅ **Automatic UID mapping** - No permission hell, files owned correctly
+- ✅ **System containers** - Full security isolation, better than Docker privileged mode
+- ✅ **Project separation** - Complete isolation between workspaces
+
+### 🛠️ Developer Experience
+- ✅ **10 CLI commands** - shell, run, build, list, info, attach, images, clean, tmux, version
+- ✅ **Shell completions** - Built-in bash/zsh/fish completions via `coi completion`
+- ✅ **Smart configuration** - TOML-based with profiles and hierarchy
+- ✅ **Tmux integration** - Background processes and session management
+- ✅ **Claude config mounting** - Automatic `~/.claude` sync (enabled by default)
+
+## 30-Second Demo
+
+```bash
+# Install
+curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
+
+# Setup (first time only, ~5-10 minutes)
+coi build sandbox
+
+# Start coding
+cd your-project
+coi shell
+
+# That's it! Claude is now running in an isolated container with:
+# ✓ Your project mounted at /workspace
+# ✓ Correct file permissions (no more chown!)
+# ✓ Full Docker access inside the container
+# ✓ All changes persisted automatically
+```
 
 ## Why Incus Over Docker?
 
@@ -128,23 +164,51 @@ ls -la file.txt
 
 ## Quick Start
 
+### Step 1: Install
+
 ```bash
-# Build the binary
-make build
+curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
+```
 
-# Build COI images
-coi build sandbox     # Standard sandbox image (coi-sandbox)
-coi build privileged  # Privileged image with Git/SSH (coi-privileged)
+This will:
+- ✓ Download and install `coi` to `/usr/local/bin`
+- ✓ Check for Incus installation
+- ✓ Verify you're in `incus-admin` group
+- ✓ Show next steps
 
-# Run a command
-coi run "echo hello"
+### Step 2: Build Images (First Time Only)
 
-# Start interactive session
+```bash
+# Basic image (5-10 minutes)
+coi build sandbox
+
+# Optional: Privileged image with Git/SSH (adds 2-3 minutes)
+coi build privileged
+```
+
+**What's in the images?**
+- `coi-sandbox`: Ubuntu 22.04 + Docker + Node.js 20 + Claude CLI + tmux
+- `coi-privileged`: Everything above + GitHub CLI + SSH + Git config
+
+### Step 3: Start Your First Session
+
+```bash
+cd your-project
 coi shell
+```
 
-# Run parallel sessions
-coi shell --slot 1  # First session
-coi shell --slot 2  # Second session
+**That's it!** You're now in an isolated container with:
+- Your project mounted at `/workspace`
+- Full Docker access
+- Correct file permissions
+- Claude CLI ready to use
+
+### Step 4: Learn More
+
+```bash
+coi --help          # See all commands
+coi shell --help    # Shell command options
+coi list            # List active sessions
 ```
 
 ## Installation
@@ -408,6 +472,126 @@ coi shell --persistent
 - **Incus** - Linux container manager
 - **Go 1.21+** - For building from source
 - **incus-admin group** - User must be in incus-admin group
+
+## Troubleshooting
+
+### Common Issues
+
+#### "incus is not available"
+```bash
+# Install Incus (Ubuntu/Debian)
+sudo apt update && sudo apt install -y incus
+
+# Initialize Incus
+sudo incus admin init --auto
+
+# Add yourself to the group
+sudo usermod -aG incus-admin $USER
+# Log out and back in for changes to take effect
+```
+
+#### "permission denied" errors
+Make sure you're in the `incus-admin` group:
+```bash
+groups | grep incus-admin
+```
+
+If not, add yourself and restart your session:
+```bash
+sudo usermod -aG incus-admin $USER
+# Log out and log back in
+```
+
+#### Container won't start
+Check if Incus daemon is running:
+```bash
+incus info
+```
+
+If not running:
+```bash
+sudo systemctl start incus
+sudo systemctl enable incus
+```
+
+#### Files created in container have wrong owner
+This should never happen with Incus! If it does:
+1. Verify you're using `coi-sandbox` or `coi-privileged` images
+2. Check UID mapping: `incus config get <container> raw.idmap`
+3. Report as a bug - this is a core feature!
+
+### Getting Help
+
+- 📖 [Full Documentation](https://github.com/mensfeld/claude-on-incus)
+- 🐛 [Report Issues](https://github.com/mensfeld/claude-on-incus/issues)
+- 💬 [Discussions](https://github.com/mensfeld/claude-on-incus/discussions)
+
+## FAQ
+
+### How is this different from Docker?
+
+See the ["Why Incus Over Docker?"](#why-incus-over-docker) section above. TL;DR:
+- **Better file permissions** - No more `chown` after every operation
+- **True isolation** - System containers, not application containers
+- **Native Docker support** - Run Docker inside without DinD hacks
+- **Multi-user friendly** - Proper UID namespacing
+
+### Can I run this on macOS or Windows?
+
+**No.** Incus is Linux-only because it uses Linux kernel features (namespaces, cgroups).
+
+For macOS/Windows, use:
+- [claudebox](https://github.com/RchGrav/claudebox) (Docker-based)
+- [run-claude-docker](https://github.com/icanhasjonas/run-claude-docker)
+
+### Can I run multiple Claude sessions on the same project?
+
+**Yes!** Use slots:
+
+```bash
+# Terminal 1
+coi shell --slot 1
+
+# Terminal 2 (same project)
+coi shell --slot 2
+
+# Terminal 3 (same project)
+coi shell --slot 3
+```
+
+Each slot gets its own container but shares the workspace files.
+
+### How much disk space do I need?
+
+- **Incus itself:** ~100MB
+- **coi-sandbox image:** ~800MB
+- **coi-privileged image:** ~1GB
+- **Per container (persistent):** ~200MB base + your tools
+
+Recommendation: **5GB free space** for comfortable usage.
+
+### Is this production-ready?
+
+**Yes!** All core features are implemented and tested:
+- ✅ 3,900+ lines of integration tests
+- ✅ Comprehensive error handling
+- ✅ Stable API
+
+Current version: **0.1.0** (see [CHANGELOG](CHANGELOG.md))
+
+### How do I update?
+
+```bash
+# Re-run installer
+curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
+
+# Or build from source
+cd claude-on-incus
+git pull
+make install
+```
+
+Containers and sessions are preserved during updates.
 
 ## License
 

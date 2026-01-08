@@ -47,7 +47,10 @@ type ProfileConfig struct {
 
 // GetDefaultConfig returns the default configuration
 func GetDefaultConfig() *Config {
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/tmp" // Fallback if home dir cannot be determined
+	}
 	baseDir := filepath.Join(homeDir, ".claude-on-incus")
 
 	return &Config{
@@ -75,8 +78,14 @@ func GetDefaultConfig() *Config {
 
 // GetConfigPaths returns the list of config file paths to check (in order)
 func GetConfigPaths() []string {
-	homeDir, _ := os.UserHomeDir()
-	workDir, _ := os.Getwd()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/tmp"
+	}
+	workDir, err := os.Getwd()
+	if err != nil {
+		workDir = "."
+	}
 
 	return []string{
 		"/etc/claude-on-incus/config.toml",              // System config
@@ -91,7 +100,10 @@ func ExpandPath(path string) string {
 		return path
 	}
 	if path[0] == '~' {
-		homeDir, _ := os.UserHomeDir()
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return path // Return path as-is if home dir cannot be determined
+		}
 		if len(path) == 1 {
 			return homeDir
 		}

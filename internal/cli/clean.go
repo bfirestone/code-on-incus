@@ -71,7 +71,7 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 			if !cleanForce {
 				fmt.Print("\nDelete these containers? [y/N]: ")
 				var response string
-				fmt.Scanln(&response)
+				_, _ = fmt.Scanln(&response) // Ignore error, default to "no" if read fails
 				if response != "y" && response != "Y" {
 					fmt.Println("Cancelled.")
 					return nil
@@ -117,7 +117,7 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 			if !cleanForce {
 				fmt.Print("\nDelete all session data? [y/N]: ")
 				var response string
-				fmt.Scanln(&response)
+				_, _ = fmt.Scanln(&response) // Ignore error, default to "no" if read fails
 				if response != "y" && response != "Y" {
 					fmt.Println("Cancelled.")
 					return nil

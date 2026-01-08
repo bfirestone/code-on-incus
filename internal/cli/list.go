@@ -118,13 +118,13 @@ func listActiveContainers() ([]ContainerInfo, error) {
 
 	var result []ContainerInfo
 	for _, c := range containers {
-		name, _ := c["name"].(string)
-		status, _ := c["status"].(string)
-		createdAt, _ := c["created_at"].(string)
+		name, _ := c["name"].(string)           // Type assertion, default to "" if fails
+		status, _ := c["status"].(string)       // Type assertion, default to "" if fails
+		createdAt, _ := c["created_at"].(string) // Type assertion, default to "" if fails
 
 		// Get image info
-		config, _ := c["config"].(map[string]interface{})
-		image, _ := config["image.description"].(string)
+		config, _ := c["config"].(map[string]interface{}) // Type assertion
+		image, _ := config["image.description"].(string)  // Type assertion
 
 		// Parse created_at time
 		createdTime := ""

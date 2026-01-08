@@ -262,8 +262,8 @@ func (b *Builder) createImage(versionAlias string) (string, error) {
 // cleanup removes the build container
 func (b *Builder) cleanup() {
 	b.opts.Logger("Cleaning up build container...")
-	b.mgr.Stop(true)
-	b.mgr.Delete(true)
+	_ = b.mgr.Stop(true)   // Best effort cleanup
+	_ = b.mgr.Delete(true) // Best effort cleanup
 }
 
 // updateAlias updates the main alias to point to the new image
@@ -276,9 +276,8 @@ func (b *Builder) updateAlias(versionAlias, mainAlias string) error {
 	}
 
 	// Delete old alias if it exists
-	exists, _ := container.ImageExists(mainAlias)
-	if exists {
-		container.IncusExec("image", "alias", "delete", mainAlias)
+	if exists, _ := container.ImageExists(mainAlias); exists {
+		_ = container.IncusExec("image", "alias", "delete", mainAlias) // Best effort
 	}
 
 	// Create new alias
