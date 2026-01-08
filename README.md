@@ -20,7 +20,7 @@ Run Claude Code in isolated, production-grade Incus containers with zero permiss
 
 **Core Capabilities**
 - Multi-slot support - Run parallel Claude sessions for the same workspace
-- Session persistence - Resume sessions with `.claude` directory restoration
+- Session resume - Resume conversations with full history and credentials restored
 - Persistent containers - Keep containers alive between sessions (installed tools preserved)
 - Workspace isolation - Each session mounts your project directory
 - **Workspace files persist even in ephemeral mode** - Only the container is deleted, your work is always saved
@@ -32,11 +32,11 @@ Run Claude Code in isolated, production-grade Incus containers with zero permiss
 - **Credential protection** - No risk of SSH keys, `.env` files, or Git credentials being exposed to Claude
 
 **Developer Experience**
-- 10 CLI commands - shell, run, build, list, info, attach, images, clean, tmux, version
+- 11 CLI commands - shell, run, build, list, info, attach, images, clean, kill, tmux, version
 - Shell completions - Built-in bash/zsh/fish completions via `coi completion`
 - Smart configuration - TOML-based with profiles and hierarchy
 - Tmux integration - Background processes and session management
-- Claude config mounting - Automatic `~/.claude` sync (enabled by default)
+- Claude config mounting - Automatic `~/.claude` and `.claude.json` sync (enabled by default)
 
 **Safe `--dangerous` Flags**
 - Claude Code CLI uses `--dangerously-disable-sandbox` and `--dangerously-allow-write-to-root` flags
@@ -145,16 +145,25 @@ coi shell --slot 2
 # Privileged mode (Git/SSH access)
 coi shell --privileged
 
-# Resume previous session
+# Resume previous session (auto-detects latest)
 coi shell --resume
+
+# Resume specific session by ID
+coi shell --resume=<session-id>
 
 # Attach to existing session
 coi attach
 
-# List active sessions
-coi list
+# List active containers and saved sessions
+coi list --all
 
-# Cleanup
+# Kill specific container
+coi kill coi-abc12345-1
+
+# Kill all containers
+coi kill --all
+
+# Cleanup stopped/orphaned containers
 coi clean
 ```
 
@@ -165,10 +174,67 @@ coi clean
 --slot NUMBER          # Slot number for parallel sessions (0 = auto-allocate)
 --privileged           # Use privileged image (Git/SSH/sudo)
 --persistent           # Keep container between sessions
---resume [SESSION_ID]  # Resume from session
+--resume [SESSION_ID]  # Resume from session (omit ID to auto-detect latest)
+--continue [SESSION_ID] # Alias for --resume
 --profile NAME         # Use named profile
 --env KEY=VALUE        # Set environment variables
 ```
+
+### Container Management
+
+```bash
+# List all containers and sessions
+coi list --all
+
+# Kill specific container (stop and delete)
+coi kill <container-name>
+
+# Kill multiple containers
+coi kill <container1> <container2>
+
+# Kill all containers (with confirmation)
+coi kill --all
+
+# Kill all without confirmation
+coi kill --all --force
+
+# Clean up stopped/orphaned containers
+coi clean
+coi clean --force  # Skip confirmation
+```
+
+## Session Resume
+
+Session resume allows you to continue a previous Claude conversation with full history and credentials restored.
+
+**Usage:**
+```bash
+# Auto-detect and resume latest session
+coi shell --resume
+
+# Resume specific session by ID
+coi shell --resume=<session-id>
+
+# Alias: --continue works the same
+coi shell --continue
+
+# List available sessions
+coi list --all
+```
+
+**What's Restored:**
+- Full conversation history from previous session
+- Claude credentials (no re-authentication needed)
+- User settings and preferences
+- Project context and conversation state
+
+**How It Works:**
+- After each session, `.claude` directory is automatically saved to `~/.coi/sessions/`
+- On resume, session data is restored to the container before Claude starts
+- Fresh credentials are injected from your host `~/.claude` directory
+- Claude automatically continues from where you left off
+
+**Note:** Resume works for both ephemeral and persistent containers. For ephemeral containers, the container is recreated but the conversation continues seamlessly.
 
 ## Persistent Mode
 
@@ -183,7 +249,7 @@ coi shell --persistent
 
 **Via config (recommended):**
 ```toml
-# ~/.config/claude-on-incus/config.toml
+# ~/.config/coi/config.toml
 [defaults]
 persistent = true
 ```
@@ -194,12 +260,12 @@ persistent = true
 - Build artifacts preserved - No re-compiling on each session
 
 **What persists:**
-- **Ephemeral mode:** Workspace files only (container deleted)
-- **Persistent mode:** Workspace files + container state + installed packages
+- **Ephemeral mode:** Workspace files + session data (container deleted)
+- **Persistent mode:** Workspace files + session data + container state + installed packages
 
 ## Configuration
 
-Config file: `~/.config/claude-on-incus/config.toml`
+Config file: `~/.config/coi/config.toml`
 
 ```toml
 [defaults]
@@ -209,8 +275,8 @@ persistent = true
 mount_claude_config = true
 
 [paths]
-sessions_dir = "~/.claude-on-incus/sessions"
-storage_dir = "~/.claude-on-incus/storage"
+sessions_dir = "~/.coi/sessions"
+storage_dir = "~/.coi/storage"
 
 [incus]
 project = "default"
@@ -225,9 +291,9 @@ persistent = true
 
 **Configuration hierarchy** (highest precedence last):
 1. Built-in defaults
-2. System config (`/etc/claude-on-incus/config.toml`)
-3. User config (`~/.config/claude-on-incus/config.toml`)
-4. Project config (`./.claude-on-incus.toml`)
+2. System config (`/etc/coi/config.toml`)
+3. User config (`~/.config/coi/config.toml`)
+4. Project config (`./.coi.toml`)
 5. CLI flags
 
 ## Use Cases
@@ -235,7 +301,7 @@ persistent = true
 | Use Case | Problem | Solution |
 |----------|---------|----------|
 | **Individual Developers** | Multiple projects with different tool versions | Each project gets isolated container with specific tools |
-| **Teams** | "Works on my machine" syndrome | Share `.claude-on-incus.toml`, everyone gets identical environment |
+| **Teams** | "Works on my machine" syndrome | Share `.coi.toml`, everyone gets identical environment |
 | **AI/ML Development** | Need Docker inside container | Incus natively supports Docker-in-container, no DinD hacks |
 | **Security-Conscious** | Can't use Docker privileged mode | True isolation without privileged mode |
 
@@ -273,13 +339,13 @@ sudo systemctl start incus
 **Production Ready** - All core features are fully implemented and tested.
 
 **Implemented Features:**
-- All CLI commands (shell, run, build, list, info, attach, images, clean, tmux, version)
+- All CLI commands (shell, run, build, list, info, attach, images, clean, kill, tmux, version)
 - Multi-slot parallel sessions
-- Session persistence with `.claude` state restoration
-- Persistent containers
+- Session resume with full conversation history and credentials restoration
+- Persistent containers with state preservation
 - Automatic UID mapping
 - TOML-based configuration with profiles
-- Comprehensive integration test suite
+- Comprehensive integration test suite (54 tests passing)
 
 ## License
 
