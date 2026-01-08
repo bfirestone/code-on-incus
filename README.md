@@ -160,8 +160,14 @@ make install
 ### One-Shot Install
 
 ```bash
-# Coming soon
-curl -sSL https://get.claude-on-incus.dev | bash
+# Install latest version
+curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
+
+# Install specific version
+VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
+
+# Build from source instead
+curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash -s -- --source
 ```
 
 ## Usage
@@ -391,11 +397,13 @@ coi shell --persistent
 - ✅ Error handling tests
 
 ### Future Enhancements
-- [ ] One-shot installer script
-- [ ] Release binaries (GitHub releases)
+- [x] One-shot installer script
+- [ ] Release binaries (GitHub releases) - *Note: installer script ready*
 - [ ] Profile checksum validation
 - [ ] Developer ergonomics (zsh + delta + fzf)
 - [ ] JSON output mode for programmatic use
+- [ ] Container health checks and auto-recovery
+- [ ] Shell completions (bash, zsh, fish)
 
 ## Requirements
 

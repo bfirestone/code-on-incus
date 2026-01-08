@@ -1,23 +1,11 @@
 """
-Test completion command help functionality.
+Test completion help mentions supported shells.
 
 Expected:
-- Help flag works
-- Help shows available shells
+- Help shows available shells (bash, zsh, fish, powershell)
 """
 
 import subprocess
-
-
-def test_completion_help_flag(coi_binary):
-    """Test that coi completion --help shows help."""
-    result = subprocess.run(
-        [coi_binary, "completion", "--help"], capture_output=True, text=True, timeout=5
-    )
-
-    assert result.returncode == 0
-    assert "completion" in result.stdout.lower()
-    assert "usage:" in result.stdout.lower() or "shell" in result.stdout.lower()
 
 
 def test_completion_help_shows_shells(coi_binary):
