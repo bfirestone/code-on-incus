@@ -1,0 +1,49 @@
+# Binaries
+coi
+claude-on-incus
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+coverage/
+coverage.html
+
+# Dependency directories
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Build artifacts
+dist/
+build/
+
+# Test artifacts
+tmp/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config files (for local testing)
+.claude-on-incus.toml
+test-config.toml
+
+# Session data (for local testing)
+.claude-on-incus/

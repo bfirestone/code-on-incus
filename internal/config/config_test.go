@@ -1,0 +1,199 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestGetDefaultConfig(t *testing.T) {
+	cfg := GetDefaultConfig()
+
+	if cfg == nil {
+		t.Fatal("Expected default config, got nil")
+	}
+
+	// Check defaults
+	if cfg.Defaults.Image != "coi-sandbox" {
+		t.Errorf("Expected default image 'coi-sandbox', got '%s'", cfg.Defaults.Image)
+	}
+
+	if cfg.Defaults.Privileged {
+		t.Error("Expected privileged to be false by default")
+	}
+
+	if cfg.Defaults.Model != "claude-sonnet-4-5" {
+		t.Errorf("Expected default model 'claude-sonnet-4-5', got '%s'", cfg.Defaults.Model)
+	}
+
+	// Check Incus config
+	if cfg.Incus.Project != "default" {
+		t.Errorf("Expected project 'default', got '%s'", cfg.Incus.Project)
+	}
+
+	if cfg.Incus.ClaudeUID != 1000 {
+		t.Errorf("Expected ClaudeUID 1000, got %d", cfg.Incus.ClaudeUID)
+	}
+
+	// Check paths are set
+	if cfg.Paths.SessionsDir == "" {
+		t.Error("Expected sessions_dir to be set")
+	}
+}
+
+func TestExpandPath(t *testing.T) {
+	homeDir, _ := os.UserHomeDir()
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "expand tilde",
+			input:    "~/test",
+			expected: filepath.Join(homeDir, "test"),
+		},
+		{
+			name:     "expand tilde only",
+			input:    "~",
+			expected: homeDir,
+		},
+		{
+			name:     "no expansion needed",
+			input:    "/absolute/path",
+			expected: "/absolute/path",
+		},
+		{
+			name:     "empty path",
+			input:    "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ExpandPath(tt.input)
+			if result != tt.expected {
+				t.Errorf("ExpandPath(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestConfigMerge(t *testing.T) {
+	base := GetDefaultConfig()
+	base.Defaults.Image = "base-image"
+	base.Defaults.Model = "base-model"
+
+	other := &Config{
+		Defaults: DefaultsConfig{
+			Image: "other-image",
+			// Model not set - should not override
+		},
+		Incus: IncusConfig{
+			ClaudeUID: 2000, // Override
+		},
+	}
+
+	base.Merge(other)
+
+	// Check that other.Image overrode base.Image
+	if base.Defaults.Image != "other-image" {
+		t.Errorf("Expected image 'other-image', got '%s'", base.Defaults.Image)
+	}
+
+	// Check that base.Model remained because other.Model was empty
+	if base.Defaults.Model != "base-model" {
+		t.Errorf("Expected model 'base-model', got '%s'", base.Defaults.Model)
+	}
+
+	// Check that ClaudeUID was overridden
+	if base.Incus.ClaudeUID != 2000 {
+		t.Errorf("Expected ClaudeUID 2000, got %d", base.Incus.ClaudeUID)
+	}
+}
+
+func TestGetProfile(t *testing.T) {
+	cfg := GetDefaultConfig()
+
+	// Add a test profile
+	cfg.Profiles["test"] = ProfileConfig{
+		Image:      "test-image",
+		Privileged: true,
+	}
+
+	// Test getting existing profile
+	profile := cfg.GetProfile("test")
+	if profile == nil {
+		t.Fatal("Expected profile, got nil")
+	}
+
+	if profile.Image != "test-image" {
+		t.Errorf("Expected image 'test-image', got '%s'", profile.Image)
+	}
+
+	// Test getting non-existent profile
+	missing := cfg.GetProfile("nonexistent")
+	if missing != nil {
+		t.Error("Expected nil for non-existent profile")
+	}
+}
+
+func TestApplyProfile(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Defaults.Image = "original-image"
+
+	// Add a test profile
+	cfg.Profiles["rust"] = ProfileConfig{
+		Image:      "rust-image",
+		Privileged: true,
+	}
+
+	// Apply the profile
+	success := cfg.ApplyProfile("rust")
+	if !success {
+		t.Error("Expected ApplyProfile to return true")
+	}
+
+	// Check that defaults were updated
+	if cfg.Defaults.Image != "rust-image" {
+		t.Errorf("Expected image 'rust-image', got '%s'", cfg.Defaults.Image)
+	}
+
+	if !cfg.Defaults.Privileged {
+		t.Error("Expected privileged to be true")
+	}
+
+	// Try to apply non-existent profile
+	success = cfg.ApplyProfile("nonexistent")
+	if success {
+		t.Error("Expected ApplyProfile to return false for non-existent profile")
+	}
+}
+
+func TestGetConfigPaths(t *testing.T) {
+	paths := GetConfigPaths()
+
+	if len(paths) < 3 {
+		t.Errorf("Expected at least 3 config paths, got %d", len(paths))
+	}
+
+	// Check that paths are in expected order
+	expectedPaths := []string{
+		"/etc/claude-on-incus/config.toml",
+	}
+
+	for i, expected := range expectedPaths {
+		if paths[i] != expected {
+			t.Errorf("Path[%d]: expected %q, got %q", i, expected, paths[i])
+		}
+	}
+
+	// Check that user config path contains .config
+	homeDir, _ := os.UserHomeDir()
+	expectedUserPath := filepath.Join(homeDir, ".config/claude-on-incus/config.toml")
+	if paths[1] != expectedUserPath {
+		t.Errorf("User config path: expected %q, got %q", expectedUserPath, paths[1])
+	}
+}

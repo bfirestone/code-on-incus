@@ -1,0 +1,337 @@
+package image
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/mensfeld/claude-on-incus/internal/container"
+)
+
+const (
+	BaseImage       = "images:ubuntu/22.04"
+	SandboxAlias    = "coi-sandbox"
+	PrivilegedAlias = "coi-privileged"
+	BuildContainer  = "coi-build"
+	ClaudeUser      = "claude"
+	ClaudeUID       = 1000
+)
+
+// BuildOptions contains options for building an image
+type BuildOptions struct {
+	ImageType    string // "sandbox", "privileged", or "custom"
+	AliasName    string
+	Description  string
+	BaseImage    string
+	Force        bool
+	BuildScript  string // For custom images
+	Logger       func(string)
+}
+
+// BuildResult contains the result of an image build
+type BuildResult struct {
+	Success      bool
+	Skipped      bool
+	VersionAlias string
+	Fingerprint  string
+	Error        error
+}
+
+// Builder handles Incus image building
+type Builder struct {
+	opts BuildOptions
+	mgr  *container.Manager
+}
+
+// NewBuilder creates a new Builder instance
+func NewBuilder(opts BuildOptions) *Builder {
+	if opts.Logger == nil {
+		opts.Logger = func(msg string) {
+			fmt.Fprintf(os.Stderr, "[build] %s\n", msg)
+		}
+	}
+
+	return &Builder{
+		opts: opts,
+		mgr:  container.NewManager(BuildContainer),
+	}
+}
+
+// Build executes the image build process
+func (b *Builder) Build() *BuildResult {
+	result := &BuildResult{}
+
+	// Check if image already exists
+	if !b.opts.Force {
+		exists, err := container.ImageExists(b.opts.AliasName)
+		if err != nil {
+			result.Error = fmt.Errorf("failed to check image: %w", err)
+			return result
+		}
+		if exists {
+			b.opts.Logger(fmt.Sprintf("Image '%s' already exists. Use --force to rebuild.", b.opts.AliasName))
+			result.Skipped = true
+			return result
+		}
+	}
+
+	// Generate version alias
+	result.VersionAlias = fmt.Sprintf("%s-%s", b.opts.AliasName, time.Now().Format("20060102-150405"))
+	b.opts.Logger(fmt.Sprintf("Building Incus image '%s'...", result.VersionAlias))
+
+	// Execute build steps
+	if err := b.launchBuildContainer(); err != nil {
+		result.Error = err
+		b.cleanup()
+		return result
+	}
+
+	if err := b.waitForNetwork(); err != nil {
+		result.Error = err
+		b.cleanup()
+		return result
+	}
+
+	// Run build steps (implemented by specific image types)
+	if err := b.runBuildSteps(); err != nil {
+		result.Error = err
+		b.cleanup()
+		return result
+	}
+
+	// Create image
+	fingerprint, err := b.createImage(result.VersionAlias)
+	if err != nil {
+		result.Error = err
+		b.cleanup()
+		return result
+	}
+	result.Fingerprint = fingerprint
+
+	// Cleanup build container
+	b.cleanup()
+
+	// Update alias
+	if err := b.updateAlias(result.VersionAlias, b.opts.AliasName); err != nil {
+		result.Error = err
+		return result
+	}
+
+	b.opts.Logger(fmt.Sprintf("Image '%s' built successfully! (version: %s)", b.opts.AliasName, result.VersionAlias))
+	result.Success = true
+	return result
+}
+
+// launchBuildContainer launches the build container from base image
+func (b *Builder) launchBuildContainer() error {
+	b.opts.Logger(fmt.Sprintf("Launching build container from %s...", b.opts.BaseImage))
+
+	if err := b.mgr.Launch(b.opts.BaseImage, false); err != nil {
+		return fmt.Errorf("failed to launch build container: %w", err)
+	}
+
+	// Wait for container to start
+	time.Sleep(3 * time.Second)
+	return nil
+}
+
+// waitForNetwork waits for network connectivity in container
+func (b *Builder) waitForNetwork() error {
+	b.opts.Logger("Waiting for network...")
+
+	maxAttempts := 30
+	for i := 0; i < maxAttempts; i++ {
+		// Use ping instead of curl (curl not installed in fresh ubuntu containers)
+		_, err := b.mgr.ExecCommand("ping -c 1 -W 2 archive.ubuntu.com", container.ExecCommandOptions{
+			Capture: true,
+		})
+		if err == nil {
+			return nil
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	return fmt.Errorf("network timeout after %d seconds", maxAttempts)
+}
+
+// runBuildSteps executes the build steps based on image type
+func (b *Builder) runBuildSteps() error {
+	switch b.opts.ImageType {
+	case "sandbox":
+		return b.buildSandbox()
+	case "privileged":
+		return b.buildPrivileged()
+	case "custom":
+		return b.buildCustom()
+	default:
+		return fmt.Errorf("unknown image type: %s", b.opts.ImageType)
+	}
+}
+
+// buildSandbox implements sandbox image build steps
+func (b *Builder) buildSandbox() error {
+	if err := b.installBaseDependencies(); err != nil {
+		return err
+	}
+	if err := b.createClaudeUser(false); err != nil {
+		return err
+	}
+	if err := b.installClaudeCLI(); err != nil {
+		return err
+	}
+	if err := b.installDocker(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// buildPrivileged implements privileged image build steps
+func (b *Builder) buildPrivileged() error {
+	// Run all sandbox steps first
+	if err := b.buildSandbox(); err != nil {
+		return err
+	}
+
+	// Add privileged extras
+	if err := b.installGitHubCLI(); err != nil {
+		return err
+	}
+	if err := b.setupSSHDirectory(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// buildCustom runs a custom build script
+func (b *Builder) buildCustom() error {
+	if b.opts.BuildScript == "" {
+		return fmt.Errorf("build script required for custom images")
+	}
+
+	b.opts.Logger("Running custom build script...")
+
+	// Create script file
+	scriptContent := fmt.Sprintf("#!/bin/bash\nset -ex\n%s", b.opts.BuildScript)
+	if err := b.mgr.CreateFile("/tmp/build_script.sh", scriptContent); err != nil {
+		return fmt.Errorf("failed to create build script: %w", err)
+	}
+
+	// Make executable
+	if _, err := b.mgr.ExecCommand("chmod +x /tmp/build_script.sh", container.ExecCommandOptions{}); err != nil {
+		return err
+	}
+
+	// Execute script
+	if _, err := b.mgr.ExecCommand("/tmp/build_script.sh", container.ExecCommandOptions{Capture: false}); err != nil {
+		return fmt.Errorf("custom build script failed: %w", err)
+	}
+
+	b.opts.Logger("Custom build script completed successfully")
+	return nil
+}
+
+// createImage publishes the container as an image
+func (b *Builder) createImage(versionAlias string) (string, error) {
+	b.opts.Logger("Stopping container for imaging...")
+	if err := b.mgr.Stop(true); err != nil {
+		return "", fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	b.opts.Logger(fmt.Sprintf("Creating image '%s'...", versionAlias))
+
+	// Publish container as image
+	_, err := container.IncusOutput(
+		"publish", BuildContainer,
+		"--alias", versionAlias,
+		fmt.Sprintf("description=%s", b.opts.Description),
+	)
+	if err != nil {
+		return "", fmt.Errorf("failed to create image: %w", err)
+	}
+
+	// Get fingerprint
+	fingerprint, err := getImageFingerprint(versionAlias)
+	if err != nil {
+		return "", err
+	}
+
+	return fingerprint, nil
+}
+
+// cleanup removes the build container
+func (b *Builder) cleanup() {
+	b.opts.Logger("Cleaning up build container...")
+	b.mgr.Stop(true)
+	b.mgr.Delete(true)
+}
+
+// updateAlias updates the main alias to point to the new image
+func (b *Builder) updateAlias(versionAlias, mainAlias string) error {
+	b.opts.Logger(fmt.Sprintf("Updating alias '%s' to point to new image...", mainAlias))
+
+	fingerprint, err := getImageFingerprint(versionAlias)
+	if err != nil {
+		return err
+	}
+
+	// Delete old alias if it exists
+	exists, _ := container.ImageExists(mainAlias)
+	if exists {
+		container.IncusExec("image", "alias", "delete", mainAlias)
+	}
+
+	// Create new alias
+	if err := container.IncusExec("image", "alias", "create", mainAlias, fingerprint); err != nil {
+		return fmt.Errorf("failed to create alias: %w", err)
+	}
+
+	return nil
+}
+
+// getImageFingerprint gets the fingerprint of an image by alias
+func getImageFingerprint(alias string) (string, error) {
+	output, err := container.IncusOutput("image", "list", alias, "--project", "default", "--format=json")
+	if err != nil {
+		return "", err
+	}
+
+	var images []map[string]interface{}
+	if err := json.Unmarshal([]byte(output), &images); err != nil {
+		return "", err
+	}
+
+	for _, img := range images {
+		if aliases, ok := img["aliases"].([]interface{}); ok {
+			for _, a := range aliases {
+				if aliasMap, ok := a.(map[string]interface{}); ok {
+					if name, ok := aliasMap["name"].(string); ok && name == alias {
+						if fingerprint, ok := img["fingerprint"].(string); ok {
+							return fingerprint, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("image not found: %s", alias)
+}
+
+// execInContainer executes a command in the build container
+func (b *Builder) execInContainer(command string, streamOutput bool) error {
+	opts := container.ExecCommandOptions{
+		Capture: !streamOutput,
+	}
+
+	output, err := b.mgr.ExecCommand(command, opts)
+	if err != nil {
+		return fmt.Errorf("command failed: %s: %w", command, err)
+	}
+
+	if streamOutput && output != "" {
+		b.opts.Logger(output)
+	}
+
+	return nil
+}

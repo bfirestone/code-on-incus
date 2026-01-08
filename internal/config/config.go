@@ -1,0 +1,171 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+)
+
+// Config represents the complete configuration
+type Config struct {
+	Defaults DefaultsConfig            `toml:"defaults"`
+	Paths    PathsConfig               `toml:"paths"`
+	Incus    IncusConfig               `toml:"incus"`
+	Profiles map[string]ProfileConfig  `toml:"profiles"`
+}
+
+// DefaultsConfig contains default settings
+type DefaultsConfig struct {
+	Image             string `toml:"image"`
+	Privileged        bool   `toml:"privileged"`
+	Persistent        bool   `toml:"persistent"`
+	Model             string `toml:"model"`
+	MountClaudeConfig bool   `toml:"mount_claude_config"`
+}
+
+// PathsConfig contains path settings
+type PathsConfig struct {
+	SessionsDir string `toml:"sessions_dir"`
+	StorageDir  string `toml:"storage_dir"`
+	LogsDir     string `toml:"logs_dir"`
+}
+
+// IncusConfig contains Incus-specific settings
+type IncusConfig struct {
+	Project   string `toml:"project"`
+	Group     string `toml:"group"`
+	ClaudeUID int    `toml:"claude_uid"`
+	ClaudeUser string `toml:"claude_user"`
+}
+
+// ProfileConfig represents a named profile
+type ProfileConfig struct {
+	Image       string            `toml:"image"`
+	Environment map[string]string `toml:"environment"`
+	Privileged  bool              `toml:"privileged"`
+	Persistent  bool              `toml:"persistent"`
+}
+
+// GetDefaultConfig returns the default configuration
+func GetDefaultConfig() *Config {
+	homeDir, _ := os.UserHomeDir()
+	baseDir := filepath.Join(homeDir, ".claude-on-incus")
+
+	return &Config{
+		Defaults: DefaultsConfig{
+			Image:             "coi-sandbox",
+			Privileged:        false,
+			Persistent:        false,
+			Model:             "claude-sonnet-4-5",
+			MountClaudeConfig: true,
+		},
+		Paths: PathsConfig{
+			SessionsDir: filepath.Join(baseDir, "sessions"),
+			StorageDir:  filepath.Join(baseDir, "storage"),
+			LogsDir:     filepath.Join(baseDir, "logs"),
+		},
+		Incus: IncusConfig{
+			Project:    "default",
+			Group:      "incus-admin",
+			ClaudeUID:  1000,
+			ClaudeUser: "claude",
+		},
+		Profiles: make(map[string]ProfileConfig),
+	}
+}
+
+// GetConfigPaths returns the list of config file paths to check (in order)
+func GetConfigPaths() []string {
+	homeDir, _ := os.UserHomeDir()
+	workDir, _ := os.Getwd()
+
+	return []string{
+		"/etc/claude-on-incus/config.toml",              // System config
+		filepath.Join(homeDir, ".config/claude-on-incus/config.toml"), // User config
+		filepath.Join(workDir, ".claude-on-incus.toml"), // Project config
+	}
+}
+
+// ExpandPath expands ~ in paths to home directory
+func ExpandPath(path string) string {
+	if len(path) == 0 {
+		return path
+	}
+	if path[0] == '~' {
+		homeDir, _ := os.UserHomeDir()
+		if len(path) == 1 {
+			return homeDir
+		}
+		return filepath.Join(homeDir, path[1:])
+	}
+	return path
+}
+
+// Merge merges another config into this one (other takes precedence)
+func (c *Config) Merge(other *Config) {
+	// Merge defaults
+	if other.Defaults.Image != "" {
+		c.Defaults.Image = other.Defaults.Image
+	}
+	if other.Defaults.Model != "" {
+		c.Defaults.Model = other.Defaults.Model
+	}
+	// For booleans, we need a way to distinguish "not set" from "false"
+	// In TOML, if a field is not present, it will be false (zero value)
+	// This is a limitation - we'll just override if file exists
+	c.Defaults.Privileged = other.Defaults.Privileged
+	c.Defaults.Persistent = other.Defaults.Persistent
+
+	// Merge paths
+	if other.Paths.SessionsDir != "" {
+		c.Paths.SessionsDir = ExpandPath(other.Paths.SessionsDir)
+	}
+	if other.Paths.StorageDir != "" {
+		c.Paths.StorageDir = ExpandPath(other.Paths.StorageDir)
+	}
+	if other.Paths.LogsDir != "" {
+		c.Paths.LogsDir = ExpandPath(other.Paths.LogsDir)
+	}
+
+	// Merge Incus settings
+	if other.Incus.Project != "" {
+		c.Incus.Project = other.Incus.Project
+	}
+	if other.Incus.Group != "" {
+		c.Incus.Group = other.Incus.Group
+	}
+	if other.Incus.ClaudeUID != 0 {
+		c.Incus.ClaudeUID = other.Incus.ClaudeUID
+	}
+	if other.Incus.ClaudeUser != "" {
+		c.Incus.ClaudeUser = other.Incus.ClaudeUser
+	}
+
+	// Merge profiles
+	for name, profile := range other.Profiles {
+		c.Profiles[name] = profile
+	}
+}
+
+// GetProfile returns a profile by name, or nil if not found
+func (c *Config) GetProfile(name string) *ProfileConfig {
+	if profile, ok := c.Profiles[name]; ok {
+		return &profile
+	}
+	return nil
+}
+
+// ApplyProfile applies a profile's settings to the defaults
+func (c *Config) ApplyProfile(name string) bool {
+	profile := c.GetProfile(name)
+	if profile == nil {
+		return false
+	}
+
+	if profile.Image != "" {
+		c.Defaults.Image = profile.Image
+	}
+	c.Defaults.Privileged = profile.Privileged
+	c.Defaults.Persistent = profile.Persistent
+
+	return true
+}

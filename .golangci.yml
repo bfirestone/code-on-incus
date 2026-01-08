@@ -1,0 +1,184 @@
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    # Error detection
+    - errcheck      # Check for unchecked errors
+    - nilerr        # Check that errors are not nil
+
+    # Code simplification
+    - gosimple      # Simplify code
+    - unconvert     # Remove unnecessary type conversions
+    - unparam       # Check for unused function parameters
+
+    # Static analysis
+    - govet         # Vet examines Go source code
+    - staticcheck   # Static analysis
+    - ineffassign   # Detect ineffectual assignments
+    - unused        # Check for unused constants, variables, functions
+
+    # Code formatting
+    - gofmt         # Check formatting
+    - goimports     # Check import formatting
+    - gofumpt       # Stricter gofmt
+
+    # Documentation (yard-lint equivalent)
+    - godot         # Check comments end with period
+    - godox         # Detect TODO/FIXME/BUG/HACK comments
+    - misspell      # Check for misspelled words in comments
+
+    # Code quality
+    - revive        # Fast, configurable, extensible, flexible linter
+    - gocritic      # Opinionated linter
+    - gocyclo       # Cyclomatic complexity
+    - dupl          # Code duplication
+    - cyclop        # Package cyclomatic complexity
+    - maintidx      # Maintainability index
+
+    # Security
+    - gosec         # Security issues
+
+    # Best practices
+    - bodyclose     # Check HTTP response bodies are closed
+    - exportloopref # Check for pointers to loop variables
+    - dogsled       # Check for too many blank identifiers
+    - errname       # Check error naming conventions
+    - errorlint     # Check error wrapping
+    - forcetypeassert # Disallow force type assertions
+    - goconst       # Find repeated strings that could be constants
+    - gocognit      # Cognitive complexity
+    - nestif        # Deep nesting
+    - predeclared   # Find shadowing of predeclared identifiers
+    - stylecheck    # Replacement for golint
+    - thelper       # Detect test helpers without t.Helper()
+    - tparallel     # Detect missing t.Parallel() calls
+    - wastedassign  # Find wasted assignment statements
+    - whitespace    # Detect unnecessary whitespace
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  govet:
+    check-shadowing: true
+    enable-all: true
+
+  gocyclo:
+    min-complexity: 15
+
+  cyclop:
+    max-complexity: 15
+    package-average: 10
+
+  gocognit:
+    min-complexity: 20
+
+  maintidx:
+    under: 80
+
+  dupl:
+    threshold: 100
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+      - experimental
+      - opinionated
+    disabled-checks:
+      - whyNoLint
+      - commentedOutCode
+
+  gosec:
+    excludes:
+      - G204 # Subprocess launched with variable - we need this for container commands
+
+  # Documentation linters (yard-lint equivalent)
+  godot:
+    scope: all
+    capital: true
+    period: true
+
+  godox:
+    keywords:
+      - TODO
+      - FIXME
+      - BUG
+      - HACK
+      - OPTIMIZE
+      - XXX
+
+  revive:
+    rules:
+      # Documentation rules (similar to yard-lint)
+      - name: exported
+        arguments:
+          - "checkPrivateReceivers"
+          - "disableStutteringCheck"
+      - name: package-comments
+      - name: unexported-return
+      - name: comment-spacings
+
+      # Code quality rules
+      - name: blank-imports
+      - name: context-as-argument
+      - name: dot-imports
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: var-declaration
+      - name: package-comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  stylecheck:
+    checks: ["all", "-ST1000", "-ST1003"]
+    dot-import-whitelist:
+      - fmt
+    initialisms: ["ACL", "API", "ASCII", "CPU", "CSS", "DNS", "EOF", "GUID", "HTML", "HTTP", "HTTPS", "ID", "IP", "JSON", "QPS", "RAM", "RPC", "SLA", "SMTP", "SQL", "SSH", "TCP", "TLS", "TTL", "UDP", "UI", "GID", "UID", "UUID", "URI", "URL", "UTF8", "VM", "XML", "XMPP", "XSRF", "XSS"]
+
+  dogsled:
+    max-blank-identifiers: 2
+
+  nestif:
+    min-complexity: 5
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+
+    # Ignore long lines in CLI help text
+    - linters:
+        - revive
+      text: "line-length-limit"
+      source: "Long:"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
