@@ -56,11 +56,57 @@ func IncusOutput(args ...string) (string, error) {
 	cmd.Stderr = nil
 
 	err := cmd.Run()
+	output := strings.TrimSpace(stdout.String())
+
 	if err != nil {
-		return "", err
+		// Extract exit code if available
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return output, &ExitError{
+				ExitCode: exitErr.ExitCode(),
+				Err:      err,
+			}
+		}
+		return output, err
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	return output, nil
+}
+
+// IncusOutputWithArgs executes incus with raw args (no additional wrapping)
+func IncusOutputWithArgs(args ...string) (string, error) {
+	// Build command with project flag
+	incusArgs := append([]string{"--project", IncusProject}, args...)
+
+	// Build properly quoted command
+	quotedArgs := make([]string, len(incusArgs))
+	for i, arg := range incusArgs {
+		quotedArgs[i] = shellQuote(arg)
+	}
+
+	incusCmd := "incus " + strings.Join(quotedArgs, " ")
+	sgArgs := []string{IncusGroup, "-c", incusCmd}
+
+	cmd := exec.Command("sg", sgArgs...)
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil
+
+	err := cmd.Run()
+	output := strings.TrimSpace(stdout.String())
+
+	if err != nil {
+		// Extract exit code if available
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return output, &ExitError{
+				ExitCode: exitErr.ExitCode(),
+				Err:      err,
+			}
+		}
+		return output, err
+	}
+
+	return output, nil
 }
 
 // IncusFilePush pushes a file into a container

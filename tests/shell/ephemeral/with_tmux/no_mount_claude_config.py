@@ -14,6 +14,7 @@ Expected:
 """
 
 import time
+import os
 
 from support.helpers import (
     assert_clean_exit,
@@ -25,13 +26,20 @@ from support.helpers import (
 )
 
 
-def test_no_mount_shows_initial_setup(coi_binary, cleanup_containers, workspace_dir):
+def test_no_mount_shows_initial_setup(coi_binary, cleanup_containers, workspace_dir, fake_claude_path):
     """Test that --mount-claude-config=false shows initial Claude setup prompts."""
 
     # Start session with --mount-claude-config=false
+    # Use fake Claude for faster testing (10x+ speedup)
+
+    env = os.environ.copy()
+
+    env["PATH"] = f"{fake_claude_path}:{env.get('PATH', '')}"
+
+
     child = spawn_coi(
         coi_binary, ["shell", "--tmux=true", "--mount-claude-config=false"], cwd=workspace_dir
-    )
+    , env=env)
 
     wait_for_container_ready(child)
 

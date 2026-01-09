@@ -14,6 +14,7 @@ Expected:
 """
 
 import time
+import os
 
 from support.helpers import (
     assert_clean_exit,
@@ -28,8 +29,15 @@ from support.helpers import (
 )
 
 
-def test_claude_responds_to_request(coi_binary, cleanup_containers, workspace_dir):
-    child = spawn_coi(coi_binary, ["shell", "--tmux=true"], cwd=workspace_dir)
+def test_claude_responds_to_request(coi_binary, cleanup_containers, workspace_dir, fake_claude_path):
+    # Use fake Claude for faster testing (10x+ speedup)
+
+    env = os.environ.copy()
+
+    env["PATH"] = f"{fake_claude_path}:{env.get('PATH', '')}"
+
+
+    child = spawn_coi(coi_binary, ["shell", "--tmux=true"], cwd=workspace_dir, env=env)
 
     wait_for_container_ready(child)
     wait_for_prompt(child)

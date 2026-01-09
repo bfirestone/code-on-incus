@@ -32,7 +32,7 @@ Run Claude Code in isolated, production-grade Incus containers with zero permiss
 - **Credential protection** - No risk of SSH keys, `.env` files, or Git credentials being exposed to Claude
 
 **Developer Experience**
-- 11 CLI commands - shell, run, build, list, info, attach, images, clean, kill, tmux, version
+- 15+ CLI commands - shell, run, build, list, info, attach, images, clean, kill, tmux, version, container, file, image
 - Shell completions - Built-in bash/zsh/fish completions via `coi completion`
 - Smart configuration - TOML-based with profiles and hierarchy
 - Tmux integration - Background processes and session management
@@ -114,11 +114,16 @@ coi build sandbox
 
 # Optional: Privileged image with Git/SSH (adds 2-3 minutes)
 coi build privileged
+
+# Custom image from your own build script
+coi build custom my-rust-image --script build-rust.sh
+coi build custom my-image --base coi-privileged --script setup.sh
 ```
 
 **What's included:**
 - `coi-sandbox`: Ubuntu 22.04 + Docker + Node.js 20 + Claude CLI + tmux
 - `coi-privileged`: Everything above + GitHub CLI + SSH + Git config
+- `custom`: Build your own images from base images using build scripts
 
 ### Verify Installation
 
@@ -201,6 +206,73 @@ coi kill --all --force
 # Clean up stopped/orphaned containers
 coi clean
 coi clean --force  # Skip confirmation
+```
+
+### Advanced Container Operations
+
+Low-level container commands for advanced use cases:
+
+```bash
+# Launch a new container
+coi container launch coi-sandbox my-container
+coi container launch coi-sandbox my-container --ephemeral
+
+# Start/stop/delete containers
+coi container start my-container
+coi container stop my-container
+coi container stop my-container --force
+coi container delete my-container
+coi container delete my-container --force
+
+# Execute commands in containers
+coi container exec my-container -- ls -la /workspace
+coi container exec my-container --user 1000 --env FOO=bar --cwd /workspace -- npm test
+coi container exec my-container --capture -- echo "hello"  # JSON output
+
+# Check container status
+coi container exists my-container
+coi container running my-container
+
+# Mount directories
+coi container mount my-container workspace /home/user/project /workspace --shift
+```
+
+### File Transfer
+
+Transfer files and directories between host and containers:
+
+```bash
+# Push files/directories into a container
+coi file push ./config.json my-container:/workspace/config.json
+coi file push -r ./src my-container:/workspace/src
+
+# Pull files/directories from a container
+coi file pull my-container:/workspace/build.log ./build.log
+coi file pull -r my-container:/root/.claude ./saved-sessions/session-123/
+```
+
+### Image Management
+
+Advanced image operations:
+
+```bash
+# List images with filters
+coi image list                           # List COI images
+coi image list --all                     # List all local images
+coi image list --prefix claudeyard-      # Filter by prefix
+coi image list --format json             # JSON output
+
+# Publish containers as images
+coi image publish my-container my-custom-image --description "Custom build"
+
+# Delete images
+coi image delete my-custom-image
+
+# Check if image exists
+coi image exists coi-sandbox
+
+# Clean up old image versions
+coi image cleanup claudeyard-node-42- --keep 3
 ```
 
 ## Session Resume
@@ -339,10 +411,13 @@ sudo systemctl start incus
 **Production Ready** - All core features are fully implemented and tested.
 
 **Implemented Features:**
-- All CLI commands (shell, run, build, list, info, attach, images, clean, kill, tmux, version)
+- Core commands: shell, run, build, list, info, attach, images, clean, kill, tmux, version
+- Advanced operations: container (launch/start/stop/delete/exec/mount), file (push/pull), image (list/publish/delete/cleanup)
 - Multi-slot parallel sessions
 - Session resume with full conversation history and credentials restoration
 - Persistent containers with state preservation
+- Custom image building from user scripts
+- Low-level container and file transfer operations
 - Automatic UID mapping
 - TOML-based configuration with profiles
 - Comprehensive integration test suite (54 tests passing)

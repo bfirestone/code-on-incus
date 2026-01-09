@@ -1,0 +1,151 @@
+#!/bin/bash
+# Fake Claude CLI for testing - simulates Claude Code behavior
+# This allows tests to run without requiring a Claude license
+
+set -euo pipefail
+
+# Configuration
+STATE_DIR="${HOME}/.claude"
+SESSIONS_DIR="${STATE_DIR}/sessions"
+
+# Parse arguments
+RESUME_MODE=false
+SESSION_ID=""
+BYPASS_PERMISSIONS=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --version)
+            echo "Claude Code CLI 1.0.0-fake (test stub)"
+            exit 0
+            ;;
+        --help)
+            cat << 'HELP'
+Fake Claude CLI for testing
+
+Usage: claude [options]
+
+Options:
+  --version              Show version
+  --help                 Show help
+  --resume <session-id>  Resume a previous session
+  --permission-mode      Permission mode (bypassPermissions skips setup)
+
+This is a test stub that simulates Claude Code behavior.
+HELP
+            exit 0
+            ;;
+        --resume)
+            RESUME_MODE=true
+            SESSION_ID="$2"
+            shift 2
+            ;;
+        --permission-mode)
+            if [[ "$2" == "bypassPermissions" ]]; then
+                BYPASS_PERMISSIONS=true
+            fi
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+# Create state directory if it doesn't exist
+mkdir -p "$STATE_DIR" "$SESSIONS_DIR"
+
+# Function to show initial setup prompts (for new installations)
+show_setup_prompts() {
+    # Skip setup if bypass permissions mode (automated testing)
+    if [ "$BYPASS_PERMISSIONS" = true ]; then
+        touch "$STATE_DIR/.setup_complete"
+        return
+    fi
+
+    if [ ! -f "$STATE_DIR/.setup_complete" ]; then
+        echo ""
+        echo "Choose the text style you want Claude to use:"
+        echo ""
+        echo "  Light mode - For bright environments"
+        echo "  Dark mode  - For low-light environments"
+        echo ""
+        echo "Select: "
+        read -r style_choice
+
+        echo ""
+        echo "Choose keyboard shortcuts:"
+        echo "  Standard"
+        echo "  Vim-style"
+        echo ""
+        read -r kb_choice
+
+        # Mark setup as complete
+        touch "$STATE_DIR/.setup_complete"
+    fi
+}
+
+# Function to show permission bypass button (common in Claude UI)
+show_bypass_button() {
+    echo ""
+    echo "[bypass permissions]  [grant]  [deny]"
+    echo ""
+}
+
+# Function to simulate resuming session
+resume_session() {
+    local session_file="$SESSIONS_DIR/$SESSION_ID"
+
+    if [ -f "$session_file" ]; then
+        echo "Resuming session $SESSION_ID..."
+        cat "$session_file"
+        show_bypass_button
+    else
+        echo "Error: Session $SESSION_ID not found"
+        exit 1
+    fi
+}
+
+# Function to save session
+save_session() {
+    local session_file="$SESSIONS_DIR/$(date +%s)"
+    echo "Session content saved" > "$session_file"
+}
+
+# Main execution
+if [ "$RESUME_MODE" = true ]; then
+    resume_session
+else
+    # New session
+    show_setup_prompts
+
+    echo ""
+    echo "Tips for getting started:"
+    echo "  - Ask me to help with code"
+    echo "  - I can read and write files"
+    echo "  - Use Ctrl+C to exit"
+    echo ""
+    echo "You: "
+fi
+
+# Simple interactive loop
+while true; do
+    read -r input || break
+
+    # Exit commands
+    if [[ "$input" == "exit" || "$input" == "quit" ]]; then
+        save_session
+        echo "Goodbye!"
+        exit 0
+    fi
+
+    # Simulate Claude response
+    echo ""
+    echo "Claude (Fake): I understand you said: $input"
+    echo ""
+
+    # Save session periodically
+    save_session
+
+    echo "You: "
+done

@@ -264,10 +264,15 @@ def wait_for_prompt(child, timeout=90):
                 wait_for_text_on_screen(child, "You:", timeout=5)
                 return True
             except TimeoutError:
-                display = child.logfile_read.get_display_stripped()
-                raise TimeoutError(
-                    f"Timeout waiting for prompt.\n\nScreen display:\n{display}"
-                ) from None
+                # When resuming, old conversation fills screen - check for bypass button
+                try:
+                    wait_for_text_on_screen(child, "bypass", timeout=5)
+                    return True
+                except TimeoutError:
+                    display = child.logfile_read.get_display_stripped()
+                    raise TimeoutError(
+                        f"Timeout waiting for prompt.\n\nScreen display:\n{display}"
+                    ) from None
     else:
         # Fallback to raw expect() for non-emulator mode
         patterns = [r"Tips for getting started", r"You:", TIMEOUT]

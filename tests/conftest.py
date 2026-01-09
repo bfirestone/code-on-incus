@@ -1,106 +1,117 @@
 """
-Pytest configuration and fixtures for pexpect-based CLI tests.
+Pytest configuration and fixtures for CLI integration tests.
 """
 
 import os
-import shutil
 import subprocess
-import uuid
-from pathlib import Path
+import sys
 
 import pytest
 
-# Set container prefix for all tests to avoid interfering with user's active sessions
-os.environ["COI_CONTAINER_PREFIX"] = "coi-test-"
+# Add tests directory to Python path so 'from support.helpers import ...' works
+tests_dir = os.path.dirname(os.path.abspath(__file__))
+if tests_dir not in sys.path:
+    sys.path.insert(0, tests_dir)
 
 
 @pytest.fixture(scope="session")
-def project_root():
-    """Get the project root directory."""
-    # __file__ = tests/conftest.py
-    # .parent = tests/
-    # .parent = claude-on-incus/
-    return Path(__file__).parent.parent
-
-
-@pytest.fixture(scope="session")
-def coi_binary(project_root):
-    """
-    Build and return path to coi binary.
-    Built once per test session and cached.
-    """
-    binary_path = project_root / "coi"
-
-    # Build if not exists or is outdated
-    print(f"\nBuilding coi binary at {binary_path}...")
-    result = subprocess.run(["make", "build"], cwd=project_root, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        pytest.fail(f"Failed to build binary:\n{result.stdout}\n{result.stderr}")
-
-    if not binary_path.exists():
-        pytest.fail(f"Binary not found at {binary_path} after build")
-
-    print(f"Binary ready at {binary_path}")
-    return str(binary_path)
+def coi_binary():
+    """Return path to coi binary."""
+    # Look for coi binary in project root
+    binary_path = os.path.join(os.path.dirname(__file__), "..", "coi")
+    if not os.path.exists(binary_path):
+        pytest.skip("coi binary not found - run 'make build' first")
+    return binary_path
 
 
 @pytest.fixture
-def cleanup_containers(request):
-    """
-    Cleanup fixture that runs after each test.
-    Cleans up any containers created during the test.
-    """
-    from support.helpers import cleanup_all_test_containers
-
-    # Run test
-    yield
-
-    # Cleanup after test (even if it failed)
-    print("\nCleaning up test containers...")
-    try:
-        cleanup_all_test_containers()
-    except Exception as e:
-        print(f"Warning: Cleanup failed: {e}")
-
-
-@pytest.fixture(scope="session")
-def integrations_tmp_dir(project_root):
-    """
-    Create project-local tmp directory for integration tests.
-    Cleaned up after all tests complete.
-    """
-    tmp_dir = project_root / "tmp" / "integrations"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    yield tmp_dir
-
-    # Cleanup after all tests complete
-    print(f"\nCleaning up integration test directory: {tmp_dir}")
-    try:
-        shutil.rmtree(tmp_dir)
-    except Exception as e:
-        print(f"Warning: Failed to cleanup {tmp_dir}: {e}")
-
-
-@pytest.fixture
-def workspace_dir(integrations_tmp_dir, request):
-    """
-    Create a temporary workspace directory for the test.
-    Uses UUID for unique directory per test run.
-    Located in project_root/tmp/integrations/{uuid}/
-    """
-    # Use UUID for unique directory
-    test_uuid = str(uuid.uuid4())[:8]  # Short UUID for readability
-    test_name = request.node.name
-
-    workspace = integrations_tmp_dir / f"{test_name}_{test_uuid}"
-    workspace.mkdir(parents=True, exist_ok=True)
+def workspace_dir(tmp_path):
+    """Provide an isolated temporary workspace directory for each test."""
+    # Create a unique workspace directory for this test
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
     return str(workspace)
 
 
 @pytest.fixture
-def sessions_dir():
-    """Get the sessions directory."""
-    home = Path.home()
-    return str(home / ".coi" / "sessions")
+def cleanup_containers():
+    """Cleanup test containers after each test."""
+    yield
+
+    # Cleanup any test containers that may be left over
+    result = subprocess.run(
+        ["sg", "incus-admin", "-c", "incus list --format=csv -c n"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        containers = result.stdout.strip().split('\n')
+        for container in containers:
+            if container.startswith("coi-test-"):
+                subprocess.run(
+                    ["sg", "incus-admin", "-c", f"incus delete --force {container}"],
+                    check=False,
+                )
+
+
+@pytest.fixture(scope="session")
+def fake_claude_path():
+    """Return path to fake Claude CLI for testing.
+
+    This allows tests to run without requiring a real Claude Code license.
+    The fake Claude simulates basic Claude behavior for testing container
+    orchestration logic.
+    """
+    fake_path = os.path.join(os.path.dirname(__file__), "..", "testdata", "fake-claude")
+    if not os.path.exists(os.path.join(fake_path, "claude")):
+        pytest.skip("fake-claude not found")
+    return os.path.abspath(fake_path)
+
+
+@pytest.fixture(scope="session")
+def fake_claude_image(coi_binary):
+    """Build and return a test image with fake Claude pre-installed.
+
+    This image includes fake Claude at /usr/local/bin/claude, allowing
+    tests to run 10x+ faster without requiring a real Claude Code license.
+
+    The image is built once per test session and reused across all tests.
+    """
+    image_name = "coi-test-fake-claude"
+
+    # Check if image already exists
+    result = subprocess.run(
+        [coi_binary, "image", "exists", image_name],
+        capture_output=True
+    )
+
+    if result.returncode == 0:
+        return image_name  # Already built
+
+    # Build image with fake Claude
+    script_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "testdata",
+        "fake-claude",
+        "install.sh"
+    )
+
+    if not os.path.exists(script_path):
+        pytest.skip(f"Fake Claude install script not found: {script_path}")
+
+    print(f"\nBuilding test image with fake Claude (one-time setup)...")
+
+    result = subprocess.run(
+        [coi_binary, "build", "custom", image_name,
+         "--script", script_path],
+        capture_output=True,
+        text=True,
+        timeout=300
+    )
+
+    if result.returncode != 0:
+        pytest.skip(f"Could not build fake Claude image: {result.stderr}")
+
+    print(f"✓ Test image '{image_name}' built successfully")
+    return image_name

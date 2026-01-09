@@ -9,6 +9,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	attachWithBash bool
+)
+
 var attachCmd = &cobra.Command{
 	Use:   "attach [container-name]",
 	Short: "Attach to a running Claude session",
@@ -19,11 +23,14 @@ If only one session is running, attaches to it automatically.
 
 Examples:
   coi attach                    # List sessions or auto-attach if only one
-  coi attach claude-abc123-1    # Attach to specific session`,
+  coi attach claude-abc123-1    # Attach to specific session
+  coi attach --bash             # Attach to bash shell instead of tmux session
+  coi attach coi-123 --bash     # Attach to specific container with bash`,
 	RunE: attachCommand,
 }
 
 func init() {
+	attachCmd.Flags().BoolVar(&attachWithBash, "bash", false, "Attach to bash shell instead of tmux session")
 	rootCmd.AddCommand(attachCmd)
 }
 
@@ -74,7 +81,10 @@ func attachCommand(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Attach to tmux session
+	// Attach to container (tmux or bash)
+	if attachWithBash {
+		return attachToContainerWithBash(targetContainer)
+	}
 	return attachToContainer(targetContainer)
 }
 
@@ -101,6 +111,30 @@ func attachToContainer(containerName string) error {
 	err := incusCmd.Run()
 	if err != nil {
 		return fmt.Errorf("failed to attach to session: %w", err)
+	}
+
+	return nil
+}
+
+func attachToContainerWithBash(containerName string) error {
+	// Execute bash as claude user
+	args := []string{
+		"exec",
+		containerName,
+		"--",
+		"su", "-", "claude",
+		"-c", "cd /workspace && exec bash",
+	}
+
+	// Use incus command
+	incusCmd := exec.Command("incus", args...)
+	incusCmd.Stdin = os.Stdin
+	incusCmd.Stdout = os.Stdout
+	incusCmd.Stderr = os.Stderr
+
+	err := incusCmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to attach to container: %w", err)
 	}
 
 	return nil

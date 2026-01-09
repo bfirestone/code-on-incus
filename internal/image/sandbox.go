@@ -2,6 +2,7 @@ package image
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/mensfeld/claude-on-incus/internal/container"
 )
@@ -71,6 +72,11 @@ func (b *Builder) createClaudeUser(privileged bool) error {
 	// Setup passwordless sudo
 	sudoersContent := fmt.Sprintf("%s ALL=(ALL) NOPASSWD:ALL", ClaudeUser)
 	if err := b.mgr.CreateFile(fmt.Sprintf("/etc/sudoers.d/%s", ClaudeUser), sudoersContent); err != nil {
+		return err
+	}
+
+	// Fix ownership and permissions (sudoers files must be owned by root)
+	if err := b.execInContainer(fmt.Sprintf("chown root:root /etc/sudoers.d/%s", ClaudeUser), false); err != nil {
 		return err
 	}
 
@@ -155,6 +161,41 @@ func (b *Builder) installDocker() error {
 		b.opts.Logger(fmt.Sprintf("Docker: %s", output))
 	}
 
+	return nil
+}
+
+// installTestClaude installs the fake Claude CLI as test-claude for testing
+func (b *Builder) installTestClaude() error {
+	b.opts.Logger("Installing test-claude (fake Claude for testing)...")
+
+	// Path to fake Claude script on the host
+	// Try to find it relative to the current working directory
+	fakeClaudeHostPath := "testdata/fake-claude/claude"
+
+	// Check if file exists on host
+	if _, err := os.Stat(fakeClaudeHostPath); err != nil {
+		b.opts.Logger("Warning: fake Claude not found on host, skipping test-claude installation")
+		return nil // Non-fatal, just skip
+	}
+
+	// Push fake Claude script to container
+	if err := b.mgr.PushFile(fakeClaudeHostPath, "/usr/local/bin/test-claude"); err != nil {
+		b.opts.Logger("Warning: failed to push test-claude, skipping")
+		return nil // Non-fatal, just skip
+	}
+
+	// Make executable
+	if err := b.execInContainer("chmod +x /usr/local/bin/test-claude", false); err != nil {
+		return err
+	}
+
+	// Verify installation
+	output, err := b.mgr.ExecCommand("test-claude --version", container.ExecCommandOptions{Capture: true})
+	if err == nil {
+		b.opts.Logger(fmt.Sprintf("test-claude: %s", output))
+	}
+
+	b.opts.Logger("test-claude installed successfully (use COI_USE_TEST_CLAUDE=1 to enable)")
 	return nil
 }
 

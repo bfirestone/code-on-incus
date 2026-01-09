@@ -265,6 +265,13 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 
 // runClaude executes the Claude CLI in the container interactively
 func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool) error {
+	// Determine which Claude binary to use (real or test)
+	claudeBinary := "claude"
+	if os.Getenv("COI_USE_TEST_CLAUDE") == "1" {
+		claudeBinary = "test-claude"
+		fmt.Fprintf(os.Stderr, "Using test-claude (fake Claude) for faster testing\n")
+	}
+
 	// Build command - either bash for debugging or Claude CLI
 	var cmdToRun string
 	if debugShell {
@@ -289,7 +296,7 @@ func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, res
 			sessionArg = fmt.Sprintf(" --session-id %s", sessionID)
 		}
 
-		cmdToRun = fmt.Sprintf("claude --verbose %s%s", permissionFlags, sessionArg)
+		cmdToRun = fmt.Sprintf("%s --verbose %s%s", claudeBinary, permissionFlags, sessionArg)
 	}
 
 	// Execute in container
@@ -326,6 +333,13 @@ func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, res
 func runClaudeInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool) error {
 	tmuxSessionName := fmt.Sprintf("coi-%s", result.ContainerName)
 
+	// Determine which Claude binary to use (real or test)
+	claudeBinary := "claude"
+	if os.Getenv("COI_USE_TEST_CLAUDE") == "1" {
+		claudeBinary = "test-claude"
+		fmt.Fprintf(os.Stderr, "Using test-claude (fake Claude) for faster testing\n")
+	}
+
 	// Build Claude command
 	var claudeCmd string
 	if debugShell {
@@ -348,7 +362,7 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 			sessionArg = fmt.Sprintf(" --session-id %s", sessionID)
 		}
 
-		claudeCmd = fmt.Sprintf("claude --verbose %s%s", permissionFlags, sessionArg)
+		claudeCmd = fmt.Sprintf("%s --verbose %s%s", claudeBinary, permissionFlags, sessionArg)
 	}
 
 	// Build environment variables

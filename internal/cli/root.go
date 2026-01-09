@@ -107,7 +107,10 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(buildCmd)
-	rootCmd.AddCommand(imagesCmd)
+	rootCmd.AddCommand(imagesCmd)      // Legacy: coi images
+	rootCmd.AddCommand(imageCmd)       // New: coi image <subcommand>
+	rootCmd.AddCommand(containerCmd)   // New: coi container <subcommand>
+	rootCmd.AddCommand(fileCmd)        // New: coi file <subcommand>
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(killCmd)
 	rootCmd.AddCommand(tmuxCmd)

@@ -180,6 +180,9 @@ func (b *Builder) buildSandbox() error {
 	if err := b.installClaudeCLI(); err != nil {
 		return err
 	}
+	if err := b.installTestClaude(); err != nil {
+		return err
+	}
 	if err := b.installDocker(); err != nil {
 		return err
 	}
@@ -211,19 +214,26 @@ func (b *Builder) buildCustom() error {
 
 	b.opts.Logger("Running custom build script...")
 
-	// Create script file
-	scriptContent := fmt.Sprintf("#!/bin/bash\nset -ex\n%s", b.opts.BuildScript)
-	if err := b.mgr.CreateFile("/tmp/build_script.sh", scriptContent); err != nil {
-		return fmt.Errorf("failed to create build script: %w", err)
+	// Read script content from file
+	scriptBytes, err := os.ReadFile(b.opts.BuildScript)
+	if err != nil {
+		return fmt.Errorf("failed to read build script: %w", err)
+	}
+
+	// Push script to container
+	b.opts.Logger(fmt.Sprintf("Uploading build script from %s...", b.opts.BuildScript))
+	if err := b.mgr.PushFile(b.opts.BuildScript, "/tmp/build.sh"); err != nil {
+		return fmt.Errorf("failed to push build script: %w", err)
 	}
 
 	// Make executable
-	if _, err := b.mgr.ExecCommand("chmod +x /tmp/build_script.sh", container.ExecCommandOptions{}); err != nil {
+	if _, err := b.mgr.ExecCommand("chmod +x /tmp/build.sh", container.ExecCommandOptions{}); err != nil {
 		return err
 	}
 
-	// Execute script
-	if _, err := b.mgr.ExecCommand("/tmp/build_script.sh", container.ExecCommandOptions{Capture: false}); err != nil {
+	// Execute script as root
+	b.opts.Logger(fmt.Sprintf("Executing build script (%d bytes)...", len(scriptBytes)))
+	if _, err := b.mgr.ExecCommand("/tmp/build.sh", container.ExecCommandOptions{Capture: false}); err != nil {
 		return fmt.Errorf("custom build script failed: %w", err)
 	}
 

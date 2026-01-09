@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mensfeld/claude-on-incus/internal/container"
 	"github.com/mensfeld/claude-on-incus/internal/session"
@@ -146,38 +147,34 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 	}
 
-	// Build command
-	command := args[0]
+	// Execute command directly (args are already the full command to run)
+	fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
 
-	// Parse environment variables
-	env := make(map[string]string)
-	for _, e := range envVars {
-		// Simple KEY=VALUE parsing
-		// TODO: More robust parsing
-		env["USER_ENV"] = e
+	// Build incus exec command directly with proper args
+	incusArgs := []string{"exec", containerName, "--user", fmt.Sprintf("%d", container.ClaudeUID),
+		"--group", fmt.Sprintf("%d", container.ClaudeUID), "--cwd", "/workspace", "--"}
+	incusArgs = append(incusArgs, args...)
+
+	// Execute and capture output and exit code
+	output, err := container.IncusOutputWithArgs(incusArgs...)
+
+	// Print output to stdout (not stderr) so it can be captured
+	if output != "" {
+		fmt.Print(output)
 	}
 
-	// Execute command
-	fmt.Fprintf(os.Stderr, "Executing: %s\n", command)
-
-	user := container.ClaudeUID
-	opts := container.ExecCommandOptions{
-		User:    &user,
-		Cwd:     "/workspace",
-		Env:     env,
-		Capture: capture,
-	}
-
-	output, err := mgr.ExecCommand(command, opts)
+	// Handle exit codes: if command ran but failed, exit with same code
 	if err != nil {
+		// Try to extract exit code from error message
+		if exitErr, ok := err.(*container.ExitError); ok {
+			fmt.Fprintf(os.Stderr, "\nCommand exited with code %d\n", exitErr.ExitCode)
+			os.Exit(exitErr.ExitCode)
+		}
+		// If we can't extract exit code, return error normally
 		return fmt.Errorf("command failed: %w", err)
 	}
 
-	if capture {
-		fmt.Println(output)
-	}
-
-	fmt.Fprintf(os.Stderr, "Command completed successfully\n")
+	fmt.Fprintf(os.Stderr, "\nCommand completed successfully\n")
 	return nil
 }
 

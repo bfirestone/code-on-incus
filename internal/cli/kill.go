@@ -114,6 +114,10 @@ func killCommand(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\nKilled %d container(s)\n", killed)
 	} else {
 		fmt.Println("\nNo containers were killed")
+		if len(containerNames) > 0 {
+			// User specified containers but none were killed - this is an error
+			return fmt.Errorf("failed to kill specified containers")
+		}
 	}
 
 	return nil
