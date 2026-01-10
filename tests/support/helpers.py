@@ -1183,7 +1183,9 @@ def calculate_container_name(workspace_dir, slot):
     prefix = os.environ.get("COI_CONTAINER_PREFIX", "coi-")
 
     # Hash the workspace path (SHA256)
-    workspace_path = str(Path(workspace_dir).resolve())
+    # Use os.path.abspath (not Path.resolve) to match Go's filepath.Abs behavior
+    # (abspath doesn't follow symlinks, resolve does)
+    workspace_path = os.path.abspath(workspace_dir)
     hash_bytes = hashlib.sha256(workspace_path.encode()).digest()
 
     # Take first 8 hex characters
