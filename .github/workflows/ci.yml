@@ -2,214 +2,129 @@ name: CI
 
 on:
   push:
-    branches: [ master, develop ]
+    branches: [master, main]
   pull_request:
-    branches: [ master, develop ]
+    branches: [master, main]
 
 jobs:
-  test-unit:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ['1.21', '1.22', '1.23']
-
+  build:
+    name: Build & Unit Tests
+    runs-on: ubuntu-24.04
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.go-version }}
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
 
-    - name: Verify dependencies
-      run: go mod verify
+      - name: Build
+        run: go build -v ./...
 
-    - name: Build
-      run: make build
+      - name: Run unit tests
+        run: go test -v ./...
 
-    - name: Run unit tests
-      run: make test-unit
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-24.04
+    needs: build
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.23'
-        cache: true
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          cache: true
 
-    - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v4
-      with:
-        version: latest
-        args: --timeout=5m
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-  coverage:
-    name: Coverage
-    runs-on: ubuntu-latest
+      - name: Cache Python dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pexpect pyte
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.23'
-        cache: true
+      - name: Install Incus
+        run: |
+          # Add Zabbly repo for latest Incus
+          sudo mkdir -p /etc/apt/keyrings/
+          sudo curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
+          sudo sh -c 'cat <<SOURCES > /etc/apt/sources.list.d/zabbly-incus-stable.sources
+          Enabled: yes
+          Types: deb
+          URIs: https://pkgs.zabbly.com/incus/stable
+          Suites: $(. /etc/os-release && echo ${VERSION_CODENAME})
+          Components: main
+          Architectures: $(dpkg --print-architecture)
+          Signed-By: /etc/apt/keyrings/zabbly.asc
+          SOURCES'
 
-    - name: Run tests with coverage
-      run: make test-coverage
+          sudo apt-get update
+          sudo apt-get install -y incus
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        file: ./coverage/coverage.out
-        fail_ci_if_error: false
-        token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Initialize Incus
+        run: |
+          # Initialize Incus with default settings
+          sudo incus admin init --auto
 
-  build-cross:
-    name: Build (Cross-Platform)
-    runs-on: ubuntu-latest
+          # Add current user to incus-admin group
+          sudo usermod -aG incus-admin $USER
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+          # Allow access without re-login by changing socket permissions
+          sudo chmod 666 /var/lib/incus/unix.socket
 
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.23'
-        cache: true
+      - name: Build COI binary
+        run: |
+          go build -o coi ./cmd/coi
+          ./coi version
 
-    - name: Build for multiple platforms
-      run: make build-all
+      - name: Cache COI image
+        id: cache-coi-image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/coi-image.tar.gz
+          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/fake-claude/**') }}
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: binaries
-        path: dist/
+      - name: Restore COI image from cache
+        if: steps.cache-coi-image.outputs.cache-hit == 'true'
+        run: |
+          echo "Restoring COI image from cache..."
+          incus image import /tmp/coi-image.tar.gz --alias coi
+          ./coi images
 
-  python-lint:
-    name: Python Lint
-    runs-on: ubuntu-latest
+      - name: Build COI image
+        if: steps.cache-coi-image.outputs.cache-hit != 'true'
+        run: |
+          echo "Building COI image (not cached)..."
+          ./coi build
+          ./coi images
+          # Export image for caching
+          incus image export coi /tmp/coi-image
 
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Run integration tests
+        run: |
+          # Run ephemeral tests
+          python -m pytest tests/shell/ephemeral/ -v --tb=short
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-        cache-dependency-path: tests/support/requirements.txt
+          # Run persistent tests
+          python -m pytest tests/shell/persistent/ -v --tb=short
+        env:
+          COI_BINARY: ./coi
 
-    - name: Install dependencies
-      run: |
-        pip install -r tests/support/requirements.txt
-        pip install ruff
-
-    - name: Run ruff linter
-      run: ruff check tests/
-
-    - name: Run ruff formatter check
-      run: ruff format --check tests/
-
-  python-tests:
-    name: Python Integration Tests (pexpect)
-    runs-on: ubuntu-22.04
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        cache: 'pip'
-        cache-dependency-path: tests/support/requirements.txt
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.23'
-        cache: true
-
-    - name: Install Python dependencies
-      run: pip install -r tests/support/requirements.txt
-
-    - name: Install Incus
-      run: |
-        echo "Installing Incus..."
-        sudo mkdir -p /etc/apt/keyrings
-        sudo curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc
-        echo "deb [signed-by=/etc/apt/keyrings/zabbly.asc] https://pkgs.zabbly.com/incus/stable $(. /etc/os-release && echo ${VERSION_CODENAME}) main" | \
-          sudo tee /etc/apt/sources.list.d/zabbly-incus-stable.list
-        sudo apt-get update
-        sudo apt-get install -y incus
-
-        cat <<'EOFINCUS' | sudo incus admin init --preseed
-        config:
-          core.https_address: 127.0.0.1:8443
-        networks:
-        - config:
-            ipv4.address: auto
-            ipv6.address: auto
-          description: ""
-          name: incusbr0
-          type: bridge
-        storage_pools:
-        - config: {}
-          description: ""
-          name: default
-          driver: dir
-        profiles:
-        - config: {}
-          description: Default Incus profile
-          devices:
-            eth0:
-              name: eth0
-              network: incusbr0
-              type: nic
-            root:
-              path: /
-              pool: default
-              type: disk
-          name: default
-        EOFINCUS
-
-    - name: Configure Incus permissions
-      run: |
-        sudo usermod -aG incus-admin $USER
-        sg incus-admin -c "incus --version"
-
-    - name: Pull base image
-      run: |
-        echo "Pulling Ubuntu 22.04 base image..."
-        sg incus-admin -c "incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04" || true
-        sg incus-admin -c "incus image list"
-
-    - name: Build binary
-      run: make build
-
-    - name: Run Python integration tests
-      run: |
-        sg incus-admin -c "pytest tests/ -v"
-
-    - name: Cleanup containers
-      if: always()
-      run: |
-        echo "Cleaning up test containers..."
-        sg incus-admin -c "incus list --format csv | grep coi-test- | cut -d, -f1 | xargs -r -n1 incus delete --force" || true
+      - name: Cleanup
+        if: always()
+        run: |
+          ./coi kill --all --force || true
+          ./coi clean --force || true

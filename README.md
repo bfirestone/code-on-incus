@@ -19,10 +19,11 @@ Run Claude Code in isolated, production-grade Incus containers with zero permiss
 ## Features
 
 **Core Capabilities**
-- Multi-slot support - Run parallel Claude sessions for the same workspace
-- Session resume - Resume conversations with full history and credentials restored
+- Multi-slot support - Run parallel Claude sessions for the same workspace with full isolation
+- Session resume - Resume conversations with full history and credentials restored (workspace-scoped)
 - Persistent containers - Keep containers alive between sessions (installed tools preserved)
 - Workspace isolation - Each session mounts your project directory
+- **Slot isolation** - Each parallel slot has its own home directory (files don't leak between slots)
 - **Workspace files persist even in ephemeral mode** - Only the container is deleted, your work is always saved
 
 **Security & Isolation**
@@ -32,7 +33,7 @@ Run Claude Code in isolated, production-grade Incus containers with zero permiss
 - **Credential protection** - No risk of SSH keys, `.env` files, or Git credentials being exposed to Claude
 
 **Developer Experience**
-- 11 CLI commands - shell, run, build, list, info, attach, images, clean, kill, tmux, version
+- 15+ CLI commands - shell, run, build, list, info, attach, images, clean, kill, tmux, version, container, file, image
 - Shell completions - Built-in bash/zsh/fish completions via `coi completion`
 - Smart configuration - TOML-based with profiles and hierarchy
 - Tmux integration - Background processes and session management
@@ -51,7 +52,7 @@ Run Claude Code in isolated, production-grade Incus containers with zero permiss
 curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
 
 # Build image (first time only, ~5-10 minutes)
-coi build sandbox
+coi build
 
 # Start coding
 cd your-project
@@ -61,6 +62,7 @@ coi shell
 # - Your project mounted at /workspace
 # - Correct file permissions (no more chown!)
 # - Full Docker access inside the container
+# - GitHub CLI available for PR/issue management
 # - All workspace changes persisted automatically
 # - No access to your host SSH keys, env vars, or credentials
 ```
@@ -109,16 +111,24 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/ins
 ### Build Images
 
 ```bash
-# Basic image (5-10 minutes)
-coi build sandbox
+# Build the unified coi image (5-10 minutes)
+coi build
 
-# Optional: Privileged image with Git/SSH (adds 2-3 minutes)
-coi build privileged
+# Custom image from your own build script
+coi build custom my-rust-image --script build-rust.sh
+coi build custom my-image --base coi --script setup.sh
 ```
 
-**What's included:**
-- `coi-sandbox`: Ubuntu 22.04 + Docker + Node.js 20 + Claude CLI + tmux
-- `coi-privileged`: Everything above + GitHub CLI + SSH + Git config
+**What's included in the `coi` image:**
+- Ubuntu 22.04 base
+- Docker (full Docker-in-container support)
+- Node.js 20 + npm
+- Claude CLI
+- GitHub CLI (`gh`)
+- tmux for session management
+- Common build tools
+
+**Custom images:** Build your own specialized images using build scripts that run on top of the base `coi` image.
 
 ### Verify Installation
 
@@ -142,10 +152,7 @@ coi shell --persistent
 # Use specific slot for parallel sessions
 coi shell --slot 2
 
-# Privileged mode (Git/SSH access)
-coi shell --privileged
-
-# Resume previous session (auto-detects latest)
+# Resume previous session (auto-detects latest for this workspace)
 coi shell --resume
 
 # Resume specific session by ID
@@ -172,11 +179,11 @@ coi clean
 ```bash
 --workspace PATH       # Workspace directory to mount (default: current directory)
 --slot NUMBER          # Slot number for parallel sessions (0 = auto-allocate)
---privileged           # Use privileged image (Git/SSH/sudo)
 --persistent           # Keep container between sessions
---resume [SESSION_ID]  # Resume from session (omit ID to auto-detect latest)
+--resume [SESSION_ID]  # Resume from session (omit ID to auto-detect latest for workspace)
 --continue [SESSION_ID] # Alias for --resume
 --profile NAME         # Use named profile
+--image NAME           # Use custom image (default: coi)
 --env KEY=VALUE        # Set environment variables
 ```
 
@@ -185,6 +192,10 @@ coi clean
 ```bash
 # List all containers and sessions
 coi list --all
+
+# Output shows container mode:
+#   coi-abc12345-1 (ephemeral)   - will be deleted on exit
+#   coi-abc12345-2 (persistent)  - will be kept for reuse
 
 # Kill specific container (stop and delete)
 coi kill <container-name>
@@ -203,13 +214,80 @@ coi clean
 coi clean --force  # Skip confirmation
 ```
 
+### Advanced Container Operations
+
+Low-level container commands for advanced use cases:
+
+```bash
+# Launch a new container
+coi container launch coi-sandbox my-container
+coi container launch coi-sandbox my-container --ephemeral
+
+# Start/stop/delete containers
+coi container start my-container
+coi container stop my-container
+coi container stop my-container --force
+coi container delete my-container
+coi container delete my-container --force
+
+# Execute commands in containers
+coi container exec my-container -- ls -la /workspace
+coi container exec my-container --user 1000 --env FOO=bar --cwd /workspace -- npm test
+coi container exec my-container --capture -- echo "hello"  # JSON output
+
+# Check container status
+coi container exists my-container
+coi container running my-container
+
+# Mount directories
+coi container mount my-container workspace /home/user/project /workspace --shift
+```
+
+### File Transfer
+
+Transfer files and directories between host and containers:
+
+```bash
+# Push files/directories into a container
+coi file push ./config.json my-container:/workspace/config.json
+coi file push -r ./src my-container:/workspace/src
+
+# Pull files/directories from a container
+coi file pull my-container:/workspace/build.log ./build.log
+coi file pull -r my-container:/root/.claude ./saved-sessions/session-123/
+```
+
+### Image Management
+
+Advanced image operations:
+
+```bash
+# List images with filters
+coi image list                           # List COI images
+coi image list --all                     # List all local images
+coi image list --prefix claudeyard-      # Filter by prefix
+coi image list --format json             # JSON output
+
+# Publish containers as images
+coi image publish my-container my-custom-image --description "Custom build"
+
+# Delete images
+coi image delete my-custom-image
+
+# Check if image exists
+coi image exists coi-sandbox
+
+# Clean up old image versions
+coi image cleanup claudeyard-node-42- --keep 3
+```
+
 ## Session Resume
 
 Session resume allows you to continue a previous Claude conversation with full history and credentials restored.
 
 **Usage:**
 ```bash
-# Auto-detect and resume latest session
+# Auto-detect and resume latest session for this workspace
 coi shell --resume
 
 # Resume specific session by ID
@@ -233,6 +311,12 @@ coi list --all
 - On resume, session data is restored to the container before Claude starts
 - Fresh credentials are injected from your host `~/.claude` directory
 - Claude automatically continues from where you left off
+
+**Workspace-Scoped Sessions:**
+- `--resume` only looks for sessions from the **current workspace directory**
+- Sessions from other workspaces are never considered (security feature)
+- This prevents accidentally resuming a session with a different project context
+- Each workspace maintains its own session history
 
 **Note:** Resume works for both ephemeral and persistent containers. For ephemeral containers, the container is recreated but the conversation continues seamlessly.
 
@@ -269,8 +353,7 @@ Config file: `~/.config/coi/config.toml`
 
 ```toml
 [defaults]
-image = "coi-sandbox"
-privileged = false
+image = "coi"
 persistent = true
 mount_claude_config = true
 
@@ -311,6 +394,36 @@ persistent = true
 - **Go 1.21+** - For building from source
 - **incus-admin group** - User must be in group
 
+## Performance: Fast Storage
+
+By default, Incus uses directory-based storage which copies entire filesystems when creating containers. For **instant container creation**, use ZFS or Btrfs which support copy-on-write cloning.
+
+### Setting Up ZFS Storage (Recommended)
+
+```bash
+# Install ZFS
+sudo apt install zfsutils-linux
+
+# Create a ZFS storage pool (50GB loopback file)
+sudo incus storage create zfs-pool zfs size=50GiB
+
+# Or use a dedicated partition for best performance
+# sudo incus storage create zfs-pool zfs source=/dev/nvme0n1p4
+
+# Update the default profile to use ZFS
+incus profile device set default root pool=zfs-pool
+```
+
+### Performance Comparison
+
+| Storage Type | Container Creation | Copy Mechanism |
+|--------------|-------------------|----------------|
+| **dir** (default) | ~10-30 seconds | Full filesystem copy |
+| **zfs** | < 1 second | Copy-on-write clone |
+| **btrfs** | < 1 second | Copy-on-write clone |
+
+After switching to ZFS, new containers use instant snapshots. Existing containers remain on the old storage pool.
+
 ## Troubleshooting
 
 ### "incus is not available"
@@ -339,13 +452,108 @@ sudo systemctl start incus
 **Production Ready** - All core features are fully implemented and tested.
 
 **Implemented Features:**
-- All CLI commands (shell, run, build, list, info, attach, images, clean, kill, tmux, version)
+- Core commands: shell, run, build, list, info, attach, images, clean, kill, tmux, version
+- Advanced operations: container (launch/start/stop/delete/exec/mount), file (push/pull), image (list/publish/delete/cleanup)
 - Multi-slot parallel sessions
 - Session resume with full conversation history and credentials restoration
 - Persistent containers with state preservation
+- Custom image building from user scripts
+- Low-level container and file transfer operations
 - Automatic UID mapping
 - TOML-based configuration with profiles
 - Comprehensive integration test suite (54 tests passing)
+
+## Container Lifecycle & Session Persistence
+
+Understanding how containers and sessions work in `coi`:
+
+### How It Works Internally
+
+1. **Containers are always launched as non-ephemeral** (persistent in Incus terms)
+   - This allows saving session data even if the container is stopped from within (e.g., `sudo shutdown 0`)
+   - Session data can be pulled from stopped containers, but not from deleted ones
+
+2. **Inside the container**: `tmux` → `bash` → `claude`
+   - When claude exits, you're dropped to bash
+   - From bash you can: type `exit`, press `Ctrl+b d` to detach, or run `sudo shutdown 0`
+
+3. **On cleanup** (when you exit/detach):
+   - Session data (`.claude` directory) is **always** saved to `~/.coi/sessions/`
+   - If `--persistent` was NOT set: container is deleted after saving
+   - If `--persistent` was set: container is kept for reuse
+
+### What Gets Preserved
+
+| Mode | Workspace Files | Claude Session | Container State |
+|------|----------------|----------------|-----------------|
+| **Default (ephemeral)** | Always saved | Always saved | Deleted |
+| **`--persistent`** | Always saved | Always saved | Kept |
+
+### Session vs Container Persistence
+
+- **`--resume`**: Restores the **Claude conversation** in a fresh container
+  - Use when you want to continue a conversation but don't need installed packages
+  - Container is recreated, only `.claude` session data is restored
+  - **Workspace-scoped**: Only finds sessions from the current workspace directory (security feature)
+
+- **`--persistent`**: Keeps the **entire container** with all modifications
+  - Use when you've installed tools, built artifacts, or modified the environment
+  - `coi attach` reconnects to the same container with everything intact
+
+### Stopping Containers
+
+From **inside** the container:
+- `exit` in bash → saves session, then deletes container (or keeps if `--persistent`)
+- `Ctrl+b d` → detaches, saves session, container stays running
+- `sudo shutdown 0` → stops container, session is saved, then container is deleted (or kept if `--persistent`)
+
+From **outside** (host):
+- `coi shutdown <name>` → graceful stop with session save, then delete
+- `coi shutdown --timeout=30 <name>` → graceful stop with 30s timeout
+- `coi kill <name>` → force stop and delete immediately
+- `coi kill --all` → force stop and delete all containers
+
+### Example Workflows
+
+**Quick task (default mode):**
+```bash
+coi shell                    # Start session
+# ... work with claude ...
+exit                         # Exit bash → session saved, container deleted
+coi shell --resume           # Continue conversation in fresh container
+```
+
+**Long-running project (`--persistent`):**
+```bash
+coi shell --persistent       # Start persistent session
+# ... install tools, build things ...
+# Press Ctrl+b d to detach
+coi attach                   # Reconnect to same container with all tools
+coi shutdown --all           # When done, clean up
+```
+
+**Parallel sessions (multi-slot):**
+```bash
+# Terminal 1: Start first session (auto-allocates slot 1)
+coi shell
+# ... working on feature A ...
+# Press Ctrl+b d to detach (container stays running)
+
+# Terminal 2: Start second session (auto-allocates slot 2)
+coi shell
+# ... working on feature B in parallel ...
+
+# Both sessions share the same workspace but have isolated:
+# - Home directories (~/slot1_file won't appear in slot 2)
+# - Installed packages
+# - Running processes
+# - Claude conversation history
+
+# List both running sessions
+coi list
+#   coi-abc12345-1 (ephemeral)
+#   coi-abc12345-2 (ephemeral)
+```
 
 ## License
 

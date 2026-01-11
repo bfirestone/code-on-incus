@@ -50,16 +50,22 @@ func listCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to list containers: %w", err)
 	}
 
-	// Build a map of container name -> workspace from saved sessions
+	// Build maps of container name -> workspace and container name -> persistent from saved sessions
+	// We search for metadata.json files directly (not using listSavedSessions which requires .claude dir)
+	// because metadata is saved early at session start, before .claude directory exists
 	containerWorkspaces := make(map[string]string)
-	if sessions, err := listSavedSessions(cfg.Paths.SessionsDir); err == nil {
-		for _, s := range sessions {
-			// Map by container name from metadata
-			metadataPath := filepath.Join(cfg.Paths.SessionsDir, s.ID, "metadata.json")
+	containerPersistent := make(map[string]bool)
+	if entries, err := os.ReadDir(cfg.Paths.SessionsDir); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			metadataPath := filepath.Join(cfg.Paths.SessionsDir, entry.Name(), "metadata.json")
 			if data, err := os.ReadFile(metadataPath); err == nil {
 				var metadata session.SessionMetadata
 				if err := json.Unmarshal(data, &metadata); err == nil && metadata.ContainerName != "" {
 					containerWorkspaces[metadata.ContainerName] = metadata.Workspace
+					containerPersistent[metadata.ContainerName] = metadata.Persistent
 				}
 			}
 		}
@@ -69,11 +75,12 @@ func listCommand(cmd *cobra.Command, args []string) error {
 		fmt.Println("  (none)")
 	} else {
 		for _, c := range containers {
-			// Show container name with persistent indicator
-			if c.Persistent {
+			// Show container name with mode indicator from session metadata
+			// (not from Incus state, since all containers are now created as persistent in Incus)
+			if persistent, ok := containerPersistent[c.Name]; ok && persistent {
 				fmt.Printf("  %s (persistent)\n", c.Name)
 			} else {
-				fmt.Printf("  %s\n", c.Name)
+				fmt.Printf("  %s (ephemeral)\n", c.Name)
 			}
 			fmt.Printf("    Status: %s\n", c.Status)
 			fmt.Printf("    Created: %s\n", c.CreatedAt)
@@ -115,11 +122,10 @@ func listCommand(cmd *cobra.Command, args []string) error {
 
 // ContainerInfo holds information about a container
 type ContainerInfo struct {
-	Name       string
-	Status     string
-	CreatedAt  string
-	Image      string
-	Persistent bool
+	Name      string
+	Status    string
+	CreatedAt string
+	Image     string
 }
 
 // SessionInfo holds information about a saved session
@@ -147,18 +153,13 @@ func listActiveContainers() ([]ContainerInfo, error) {
 
 	var result []ContainerInfo
 	for _, c := range containers {
-		name, _ := c["name"].(string)           // Type assertion, default to "" if fails
-		status, _ := c["status"].(string)       // Type assertion, default to "" if fails
+		name, _ := c["name"].(string)            // Type assertion, default to "" if fails
+		status, _ := c["status"].(string)        // Type assertion, default to "" if fails
 		createdAt, _ := c["created_at"].(string) // Type assertion, default to "" if fails
 
-		// Get image info and ephemeral flag
+		// Get image info
 		config, _ := c["config"].(map[string]interface{}) // Type assertion
 		image, _ := config["image.description"].(string)  // Type assertion
-
-		// Check if ephemeral (persistent = !ephemeral)
-		// If ephemeral is not set or is false, container is persistent
-		ephemeral, _ := c["ephemeral"].(bool)
-		persistent := !ephemeral
 
 		// Parse created_at time
 		createdTime := ""
@@ -167,11 +168,10 @@ func listActiveContainers() ([]ContainerInfo, error) {
 		}
 
 		result = append(result, ContainerInfo{
-			Name:       name,
-			Status:     status,
-			CreatedAt:  createdTime,
-			Image:      image,
-			Persistent: persistent,
+			Name:      name,
+			Status:    status,
+			CreatedAt: createdTime,
+			Image:     image,
 		})
 	}
 

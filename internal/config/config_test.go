@@ -14,12 +14,8 @@ func TestGetDefaultConfig(t *testing.T) {
 	}
 
 	// Check defaults
-	if cfg.Defaults.Image != "coi-sandbox" {
-		t.Errorf("Expected default image 'coi-sandbox', got '%s'", cfg.Defaults.Image)
-	}
-
-	if cfg.Defaults.Privileged {
-		t.Error("Expected privileged to be false by default")
+	if cfg.Defaults.Image != "coi" {
+		t.Errorf("Expected default image 'coi', got '%s'", cfg.Defaults.Image)
 	}
 
 	if cfg.Defaults.Model != "claude-sonnet-4-5" {
@@ -31,8 +27,8 @@ func TestGetDefaultConfig(t *testing.T) {
 		t.Errorf("Expected project 'default', got '%s'", cfg.Incus.Project)
 	}
 
-	if cfg.Incus.ClaudeUID != 1000 {
-		t.Errorf("Expected ClaudeUID 1000, got %d", cfg.Incus.ClaudeUID)
+	if cfg.Incus.CodeUID != 1000 {
+		t.Errorf("Expected CodeUID 1000, got %d", cfg.Incus.CodeUID)
 	}
 
 	// Check paths are set
@@ -92,7 +88,7 @@ func TestConfigMerge(t *testing.T) {
 			// Model not set - should not override
 		},
 		Incus: IncusConfig{
-			ClaudeUID: 2000, // Override
+			CodeUID: 2000, // Override
 		},
 	}
 
@@ -108,9 +104,9 @@ func TestConfigMerge(t *testing.T) {
 		t.Errorf("Expected model 'base-model', got '%s'", base.Defaults.Model)
 	}
 
-	// Check that ClaudeUID was overridden
-	if base.Incus.ClaudeUID != 2000 {
-		t.Errorf("Expected ClaudeUID 2000, got %d", base.Incus.ClaudeUID)
+	// Check that CodeUID was overridden
+	if base.Incus.CodeUID != 2000 {
+		t.Errorf("Expected CodeUID 2000, got %d", base.Incus.CodeUID)
 	}
 }
 
@@ -120,7 +116,7 @@ func TestGetProfile(t *testing.T) {
 	// Add a test profile
 	cfg.Profiles["test"] = ProfileConfig{
 		Image:      "test-image",
-		Privileged: true,
+		Persistent: true,
 	}
 
 	// Test getting existing profile
@@ -147,7 +143,7 @@ func TestApplyProfile(t *testing.T) {
 	// Add a test profile
 	cfg.Profiles["rust"] = ProfileConfig{
 		Image:      "rust-image",
-		Privileged: true,
+		Persistent: true,
 	}
 
 	// Apply the profile
@@ -161,8 +157,8 @@ func TestApplyProfile(t *testing.T) {
 		t.Errorf("Expected image 'rust-image', got '%s'", cfg.Defaults.Image)
 	}
 
-	if !cfg.Defaults.Privileged {
-		t.Error("Expected privileged to be true")
+	if !cfg.Defaults.Persistent {
+		t.Error("Expected persistent to be true")
 	}
 
 	// Try to apply non-existent profile

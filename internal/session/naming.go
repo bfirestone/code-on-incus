@@ -2,12 +2,12 @@ package session
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/mensfeld/claude-on-incus/internal/container"
 )
@@ -61,22 +61,32 @@ func AllocateSlot(workspacePath string, maxSlots int) (int, error) {
 		return 0, err
 	}
 
-	// Parse running containers
+	// Parse running containers using proper JSON parsing
 	runningSlots := make(map[int]bool)
 	re := regexp.MustCompile(fmt.Sprintf(`^%s(\d+)$`, regexp.QuoteMeta(prefix)))
 
-	// Simple JSON parsing - look for container names
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, `"name"`) {
-			// Extract name from JSON line like: "name": "coi-abc12345-1",
-			nameMatch := regexp.MustCompile(`"name":\s*"([^"]+)"`).FindStringSubmatch(line)
-			if len(nameMatch) > 1 {
-				containerName := nameMatch[1]
+	// Parse JSON array of containers
+	var containers []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(output), &containers); err != nil {
+		// Fallback: if JSON parsing fails, try regex on raw output
+		nameMatches := regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`).FindAllStringSubmatch(output, -1)
+		for _, match := range nameMatches {
+			if len(match) > 1 {
+				containerName := match[1]
 				if matches := re.FindStringSubmatch(containerName); len(matches) > 1 {
 					if slotNum, err := strconv.Atoi(matches[1]); err == nil {
 						runningSlots[slotNum] = true
 					}
+				}
+			}
+		}
+	} else {
+		for _, c := range containers {
+			if matches := re.FindStringSubmatch(c.Name); len(matches) > 1 {
+				if slotNum, err := strconv.Atoi(matches[1]); err == nil {
+					runningSlots[slotNum] = true
 				}
 			}
 		}
@@ -108,22 +118,32 @@ func AllocateSlotFrom(workspacePath string, startSlot, maxSlots int) (int, error
 		return 0, err
 	}
 
-	// Parse running containers
+	// Parse running containers using proper JSON parsing
 	runningSlots := make(map[int]bool)
 	re := regexp.MustCompile(fmt.Sprintf(`^%s(\d+)$`, regexp.QuoteMeta(prefix)))
 
-	// Simple JSON parsing - look for container names
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, `"name"`) {
-			// Extract name from JSON line like: "name": "coi-abc12345-1",
-			nameMatch := regexp.MustCompile(`"name":\s*"([^"]+)"`).FindStringSubmatch(line)
-			if len(nameMatch) > 1 {
-				containerName := nameMatch[1]
+	// Parse JSON array of containers
+	var containers []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(output), &containers); err != nil {
+		// Fallback: if JSON parsing fails, try regex on raw output
+		nameMatches := regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`).FindAllStringSubmatch(output, -1)
+		for _, match := range nameMatches {
+			if len(match) > 1 {
+				containerName := match[1]
 				if matches := re.FindStringSubmatch(containerName); len(matches) > 1 {
 					if slotNum, err := strconv.Atoi(matches[1]); err == nil {
 						runningSlots[slotNum] = true
 					}
+				}
+			}
+		}
+	} else {
+		for _, c := range containers {
+			if matches := re.FindStringSubmatch(c.Name); len(matches) > 1 {
+				if slotNum, err := strconv.Atoi(matches[1]); err == nil {
+					runningSlots[slotNum] = true
 				}
 			}
 		}
@@ -182,16 +202,28 @@ func ListWorkspaceSessions(workspacePath string) (map[int]string, error) {
 	sessions := make(map[int]string)
 	re := regexp.MustCompile(fmt.Sprintf(`^%s(\d+)$`, regexp.QuoteMeta(prefix)))
 
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, `"name"`) {
-			nameMatch := regexp.MustCompile(`"name":\s*"([^"]+)"`).FindStringSubmatch(line)
-			if len(nameMatch) > 1 {
-				containerName := nameMatch[1]
+	// Parse JSON array of containers
+	var containers []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(output), &containers); err != nil {
+		// Fallback: if JSON parsing fails, try regex on raw output
+		nameMatches := regexp.MustCompile(`"name"\s*:\s*"([^"]+)"`).FindAllStringSubmatch(output, -1)
+		for _, match := range nameMatches {
+			if len(match) > 1 {
+				containerName := match[1]
 				if matches := re.FindStringSubmatch(containerName); len(matches) > 1 {
 					if slotNum, err := strconv.Atoi(matches[1]); err == nil {
 						sessions[slotNum] = containerName
 					}
+				}
+			}
+		}
+	} else {
+		for _, c := range containers {
+			if matches := re.FindStringSubmatch(c.Name); len(matches) > 1 {
+				if slotNum, err := strconv.Atoi(matches[1]); err == nil {
+					sessions[slotNum] = c.Name
 				}
 			}
 		}

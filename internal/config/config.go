@@ -7,19 +7,17 @@ import (
 
 // Config represents the complete configuration
 type Config struct {
-	Defaults DefaultsConfig            `toml:"defaults"`
-	Paths    PathsConfig               `toml:"paths"`
-	Incus    IncusConfig               `toml:"incus"`
-	Profiles map[string]ProfileConfig  `toml:"profiles"`
+	Defaults DefaultsConfig           `toml:"defaults"`
+	Paths    PathsConfig              `toml:"paths"`
+	Incus    IncusConfig              `toml:"incus"`
+	Profiles map[string]ProfileConfig `toml:"profiles"`
 }
 
 // DefaultsConfig contains default settings
 type DefaultsConfig struct {
-	Image             string `toml:"image"`
-	Privileged        bool   `toml:"privileged"`
-	Persistent        bool   `toml:"persistent"`
-	Model             string `toml:"model"`
-	MountClaudeConfig bool   `toml:"mount_claude_config"`
+	Image      string `toml:"image"`
+	Persistent bool   `toml:"persistent"`
+	Model      string `toml:"model"`
 }
 
 // PathsConfig contains path settings
@@ -31,17 +29,16 @@ type PathsConfig struct {
 
 // IncusConfig contains Incus-specific settings
 type IncusConfig struct {
-	Project   string `toml:"project"`
-	Group     string `toml:"group"`
-	ClaudeUID int    `toml:"claude_uid"`
-	ClaudeUser string `toml:"claude_user"`
+	Project  string `toml:"project"`
+	Group    string `toml:"group"`
+	CodeUID  int    `toml:"code_uid"`
+	CodeUser string `toml:"code_user"`
 }
 
 // ProfileConfig represents a named profile
 type ProfileConfig struct {
 	Image       string            `toml:"image"`
 	Environment map[string]string `toml:"environment"`
-	Privileged  bool              `toml:"privileged"`
 	Persistent  bool              `toml:"persistent"`
 }
 
@@ -55,11 +52,9 @@ func GetDefaultConfig() *Config {
 
 	return &Config{
 		Defaults: DefaultsConfig{
-			Image:             "coi-sandbox",
-			Privileged:        false,
-			Persistent:        false,
-			Model:             "claude-sonnet-4-5",
-			MountClaudeConfig: true,
+			Image:      "coi",
+			Persistent: false,
+			Model:      "claude-sonnet-4-5",
 		},
 		Paths: PathsConfig{
 			SessionsDir: filepath.Join(baseDir, "sessions"),
@@ -67,10 +62,10 @@ func GetDefaultConfig() *Config {
 			LogsDir:     filepath.Join(baseDir, "logs"),
 		},
 		Incus: IncusConfig{
-			Project:    "default",
-			Group:      "incus-admin",
-			ClaudeUID:  1000,
-			ClaudeUser: "claude",
+			Project:  "default",
+			Group:    "incus-admin",
+			CodeUID:  1000,
+			CodeUser: "code",
 		},
 		Profiles: make(map[string]ProfileConfig),
 	}
@@ -88,9 +83,9 @@ func GetConfigPaths() []string {
 	}
 
 	return []string{
-		"/etc/coi/config.toml",                          // System config
+		"/etc/coi/config.toml",                            // System config
 		filepath.Join(homeDir, ".config/coi/config.toml"), // User config
-		filepath.Join(workDir, ".coi.toml"),             // Project config
+		filepath.Join(workDir, ".coi.toml"),               // Project config
 	}
 }
 
@@ -124,7 +119,6 @@ func (c *Config) Merge(other *Config) {
 	// For booleans, we need a way to distinguish "not set" from "false"
 	// In TOML, if a field is not present, it will be false (zero value)
 	// This is a limitation - we'll just override if file exists
-	c.Defaults.Privileged = other.Defaults.Privileged
 	c.Defaults.Persistent = other.Defaults.Persistent
 
 	// Merge paths
@@ -145,11 +139,11 @@ func (c *Config) Merge(other *Config) {
 	if other.Incus.Group != "" {
 		c.Incus.Group = other.Incus.Group
 	}
-	if other.Incus.ClaudeUID != 0 {
-		c.Incus.ClaudeUID = other.Incus.ClaudeUID
+	if other.Incus.CodeUID != 0 {
+		c.Incus.CodeUID = other.Incus.CodeUID
 	}
-	if other.Incus.ClaudeUser != "" {
-		c.Incus.ClaudeUser = other.Incus.ClaudeUser
+	if other.Incus.CodeUser != "" {
+		c.Incus.CodeUser = other.Incus.CodeUser
 	}
 
 	// Merge profiles
@@ -176,7 +170,6 @@ func (c *Config) ApplyProfile(name string) bool {
 	if profile.Image != "" {
 		c.Defaults.Image = profile.Image
 	}
-	c.Defaults.Privileged = profile.Privileged
 	c.Defaults.Persistent = profile.Persistent
 
 	return true

@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	ClaudeUID     = 1000
-	ClaudeUser    = "claude"
-	IncusGroup    = "incus-admin"
-	IncusProject  = "default"
+	CodeUID      = 1000
+	CodeUser     = "code"
+	IncusGroup   = "incus-admin"
+	IncusProject = "default"
 )
 
 // IncusExec executes an Incus command via sg wrapper for group permissions
@@ -56,11 +56,57 @@ func IncusOutput(args ...string) (string, error) {
 	cmd.Stderr = nil
 
 	err := cmd.Run()
+	output := strings.TrimSpace(stdout.String())
+
 	if err != nil {
-		return "", err
+		// Extract exit code if available
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return output, &ExitError{
+				ExitCode: exitErr.ExitCode(),
+				Err:      err,
+			}
+		}
+		return output, err
 	}
 
-	return strings.TrimSpace(stdout.String()), nil
+	return output, nil
+}
+
+// IncusOutputWithArgs executes incus with raw args (no additional wrapping)
+func IncusOutputWithArgs(args ...string) (string, error) {
+	// Build command with project flag
+	incusArgs := append([]string{"--project", IncusProject}, args...)
+
+	// Build properly quoted command
+	quotedArgs := make([]string, len(incusArgs))
+	for i, arg := range incusArgs {
+		quotedArgs[i] = shellQuote(arg)
+	}
+
+	incusCmd := "incus " + strings.Join(quotedArgs, " ")
+	sgArgs := []string{IncusGroup, "-c", incusCmd}
+
+	cmd := exec.Command("sg", sgArgs...)
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil
+
+	err := cmd.Run()
+	output := strings.TrimSpace(stdout.String())
+
+	if err != nil {
+		// Extract exit code if available
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return output, &ExitError{
+				ExitCode: exitErr.ExitCode(),
+				Err:      err,
+			}
+		}
+		return output, err
+	}
+
+	return output, nil
 }
 
 // IncusFilePush pushes a file into a container
@@ -91,12 +137,12 @@ func ContainerExec(containerName, command string, opts ContainerExecOptions) (st
 	}
 	args = append(args, "--cwd", opts.Cwd)
 
-	// User context: run as claude user by default
+	// User context: run as code user by default
 	var envFlags []string
 	if !opts.RunAsRoot {
-		args = append(args, "--user", fmt.Sprintf("%d", ClaudeUID))
-		args = append(args, "--group", fmt.Sprintf("%d", ClaudeUID))
-		envFlags = append(envFlags, "--env", "HOME=/home/claude")
+		args = append(args, "--user", fmt.Sprintf("%d", CodeUID))
+		args = append(args, "--group", fmt.Sprintf("%d", CodeUID))
+		envFlags = append(envFlags, "--env", "HOME=/home/code")
 	}
 
 	// Sandbox mode
@@ -184,9 +230,12 @@ func ContainerRunning(containerName string) (bool, error) {
 
 // PublishContainer publishes a stopped container as an image
 func PublishContainer(containerName, aliasName, description string) (string, error) {
-	// Stop container first
-	if err := StopContainer(containerName); err != nil {
-		return "", err
+	// Stop container if running (ignore error if already stopped)
+	running, _ := ContainerRunning(containerName)
+	if running {
+		if err := StopContainer(containerName); err != nil {
+			return "", err
+		}
 	}
 
 	// Build publish command

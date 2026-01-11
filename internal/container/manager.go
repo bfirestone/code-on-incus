@@ -5,11 +5,22 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Manager provides a clean interface for Incus container operations
 type Manager struct {
 	ContainerName string
+}
+
+// ExitError represents a command that ran but exited with non-zero status
+type ExitError struct {
+	ExitCode int
+	Err      error
+}
+
+func (e *ExitError) Error() string {
+	return fmt.Sprintf("exit status %d", e.ExitCode)
 }
 
 // NewManager creates a new container manager
@@ -81,6 +92,37 @@ func (m *Manager) Exec(args ...string) error {
 	return IncusExec(cmdArgs...)
 }
 
+// ExecArgs executes command arguments in the container with options
+func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error {
+	args := []string{"exec", m.ContainerName}
+
+	// Add environment variables
+	for k, v := range opts.Env {
+		args = append(args, "--env", fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Add working directory
+	if opts.Cwd != "" {
+		args = append(args, "--cwd", opts.Cwd)
+	}
+
+	// Add user/group
+	if opts.User != nil {
+		args = append(args, "--user", fmt.Sprintf("%d", *opts.User))
+		group := opts.User // default to same as user
+		if opts.Group != nil {
+			group = opts.Group
+		}
+		args = append(args, "--group", fmt.Sprintf("%d", *group))
+	}
+
+	// Add command arguments
+	args = append(args, "--")
+	args = append(args, commandArgs...)
+
+	return IncusExec(args...)
+}
+
 // ExecCommandOptions holds options for executing commands
 type ExecCommandOptions struct {
 	User        *int
@@ -131,7 +173,7 @@ func (m *Manager) ExecCommand(command string, opts ExecCommandOptions) (string, 
 
 // PushFile pushes a file into the container
 func (m *Manager) PushFile(source, destination string) error {
-	// Ensure destination starts with container name
+	// Ensure destination starts with /
 	if destination[0] != '/' {
 		destination = "/" + destination
 	}
@@ -141,13 +183,40 @@ func (m *Manager) PushFile(source, destination string) error {
 
 // PullDirectory pulls a directory from the container recursively
 func (m *Manager) PullDirectory(containerPath, localPath string) error {
-	// Create local directory
-	if err := os.MkdirAll(localPath, 0755); err != nil {
+	// Incus creates a subdirectory when pulling, so we pull to a temp location
+	// then move the contents to the desired location
+	tempDir, err := os.MkdirTemp("", "coi-pull-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Pull to temp directory (creates tempDir/dirname/)
+	source := m.ContainerName + containerPath
+	if err := IncusExec("file", "pull", "-r", source, tempDir); err != nil {
 		return err
 	}
 
-	source := m.ContainerName + containerPath
-	return IncusExec("file", "pull", "-r", source, localPath)
+	// Find the pulled directory (it will be the only item in tempDir)
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("no files pulled")
+	}
+
+	// Move the pulled directory to the desired location
+	pulledDir := filepath.Join(tempDir, entries[0].Name())
+	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+		return err
+	}
+
+	// Remove destination if it exists
+	os.RemoveAll(localPath)
+
+	// Rename (move) the pulled directory to the final location
+	return os.Rename(pulledDir, localPath)
 }
 
 // PushDirectory pushes a directory to the container recursively
@@ -157,7 +226,14 @@ func (m *Manager) PushDirectory(localPath, containerPath string) error {
 		return nil // Skip if not a directory
 	}
 
-	dest := m.ContainerName + containerPath
+	// Incus creates a subdirectory when pushing, so we push to the parent
+	// e.g., pushing /local/dir to container/remote/parent/ creates /remote/parent/dir
+	// To get /remote/dir, we need to push to container/remote/
+	parentPath := containerPath[:strings.LastIndex(containerPath, "/")+1]
+	if parentPath == "" {
+		parentPath = "/"
+	}
+	dest := m.ContainerName + parentPath
 	return IncusExec("file", "push", "-r", localPath, dest)
 }
 

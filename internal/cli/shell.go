@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/mensfeld/claude-on-incus/internal/container"
@@ -35,7 +36,6 @@ Examples:
   coi shell --resume                # Resume latest session (auto)
   coi shell --resume=<session-id>   # Resume specific session (note: = is required)
   coi shell --continue=<session-id> # Same as --resume (alias)
-  coi shell --privileged            # Privileged mode with Git/SSH
   coi shell --slot 2                # Use specific slot
   coi shell --debug                 # Launch bash for debugging
 `,
@@ -86,14 +86,10 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 
 	// Auto-detect if flag was set but value is empty or "auto"
 	if resumeFlagSet && (resumeID == "" || resumeID == "auto") {
-		// Auto-detect latest for workspace
+		// Auto-detect latest for workspace (only looks at sessions from the same workspace)
 		resumeID, err = session.GetLatestSessionForWorkspace(sessionsDir, absWorkspace)
 		if err != nil {
-			// Fallback to global latest if no workspace-specific session found
-			resumeID, err = session.GetLatestSession(sessionsDir)
-			if err != nil {
-				return fmt.Errorf("no previous session to resume: %w", err)
-			}
+			return fmt.Errorf("no previous session to resume for this workspace: %w", err)
 		}
 		fmt.Fprintf(os.Stderr, "Auto-detected session: %s\n", resumeID)
 	} else if resumeID != "" {
@@ -104,8 +100,8 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Resuming session: %s\n", resumeID)
 	}
 
-	// When resuming, inherit persistent and privileged flags from the original session
-	// unless they were explicitly overridden by the user
+	// When resuming, inherit persistent flag from the original session
+	// unless it was explicitly overridden by the user
 	if resumeID != "" {
 		metadataPath := filepath.Join(sessionsDir, resumeID, "metadata.json")
 		if metadata, err := session.LoadSessionMetadata(metadataPath); err == nil {
@@ -114,13 +110,6 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 				persistent = metadata.Persistent
 				if persistent {
 					fmt.Fprintf(os.Stderr, "Inherited persistent mode from session\n")
-				}
-			}
-			// Inherit privileged flag if not explicitly set by user
-			if !cmd.Flags().Changed("privileged") {
-				privileged = metadata.Privileged
-				if privileged {
-					fmt.Fprintf(os.Stderr, "Inherited privileged mode from session\n")
 				}
 			}
 		}
@@ -167,17 +156,13 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 
 	// Setup session
 	setupOpts := session.SetupOptions{
-		WorkspacePath:     absWorkspace,
-		Image:             imageName,
-		Privileged:        privileged,
-		Persistent:        persistent,
-		ResumeFromID:      resumeID,
-		Slot:              slotNum,
-		SessionsDir:       sessionsDir,
-		SSHKeyPath:        filepath.Join(homeDir, ".ssh", "id_coi"),
-		GitConfigPath:     filepath.Join(homeDir, ".gitconfig"),
-		ClaudeConfigPath:  filepath.Join(homeDir, ".claude"),
-		MountClaudeConfig: mountClaudeConfig,
+		WorkspacePath:    absWorkspace,
+		Image:            imageName,
+		Persistent:       persistent,
+		ResumeFromID:     resumeID,
+		Slot:             slotNum,
+		SessionsDir:      sessionsDir,
+		ClaudeConfigPath: filepath.Join(homeDir, ".claude"),
 	}
 
 	if storage != "" {
@@ -190,13 +175,17 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to setup session: %w", err)
 	}
 
+	// Save metadata early so coi list shows correct persistent/ephemeral status
+	if err := session.SaveMetadataEarly(sessionsDir, sessionID, result.ContainerName, absWorkspace, persistent); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to save early metadata: %v\n", err)
+	}
+
 	// Setup cleanup on exit
 	defer func() {
 		fmt.Fprintf(os.Stderr, "\nCleaning up session...\n")
 		cleanupOpts := session.CleanupOptions{
 			ContainerName: result.ContainerName,
 			SessionID:     sessionID,
-			Privileged:    privileged,
 			Persistent:    persistent,
 			SessionsDir:   sessionsDir,
 			SaveSession:   true, // Always save session data
@@ -223,12 +212,14 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	fmt.Fprintf(os.Stderr, "Workspace: %s\n", absWorkspace)
 
 	// Determine resume mode
-	// When resuming, always pass --resume flag to Claude CLI so it knows which session to resume
 	// The difference is:
-	// - Persistent: container is reused, session data stays in container
-	// - Ephemeral: container is recreated, we restore .claude dir and pass --resume
-	useResumeFlag := (resumeID != "")
-	restoreOnly := false // No longer used - always use --resume flag
+	// - Persistent: container is reused, .claude stays in container, pass --resume to Claude
+	// - Ephemeral: container is recreated, we restore .claude dir, let Claude auto-detect session
+	//
+	// For persistent containers resuming: pass --resume flag with our session ID
+	// For ephemeral containers resuming: just restore .claude, Claude will auto-detect from restored data
+	useResumeFlag := (resumeID != "") && persistent
+	restoreOnly := (resumeID != "") && !persistent
 
 	// Choose execution mode
 	if useTmux {
@@ -243,7 +234,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
 		}
 		fmt.Fprintf(os.Stderr, "\n")
-		err = runClaudeInTmux(result, sessionID, background, useResumeFlag, restoreOnly)
+		err = runClaudeInTmux(result, sessionID, background, useResumeFlag, restoreOnly, sessionsDir, resumeID)
 	} else {
 		fmt.Fprintf(os.Stderr, "Mode: Direct (no tmux)\n")
 		if restoreOnly {
@@ -252,48 +243,83 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
 		}
 		fmt.Fprintf(os.Stderr, "\n")
-		err = runClaude(result, sessionID, useResumeFlag, restoreOnly)
+		err = runClaude(result, sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID)
 	}
 
-	// Exit status 130 means interrupted by SIGINT (Ctrl+C) - this is normal, not an error
-	if err != nil && err.Error() == "exit status 130" {
-		return nil
+	// Handle expected exit conditions gracefully
+	if err != nil {
+		errStr := err.Error()
+		// Exit status 130 means interrupted by SIGINT (Ctrl+C) - this is normal
+		if errStr == "exit status 130" {
+			return nil
+		}
+		// Container shutdown from within (sudo shutdown 0) causes exec to fail
+		// This can manifest as various errors depending on timing
+		if strings.Contains(errStr, "Failed to retrieve PID") ||
+			strings.Contains(errStr, "server exited") ||
+			strings.Contains(errStr, "connection reset") ||
+			errStr == "exit status 1" {
+			// Don't print anything - cleanup will show appropriate message
+			return nil
+		}
 	}
 
 	return err
 }
 
+// getEnvValue checks for an env var in --env flags first, then os.Getenv
+func getEnvValue(key string) string {
+	// Check --env flags first
+	for _, e := range envVars {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 && parts[0] == key {
+			return parts[1]
+		}
+	}
+	// Fall back to os.Getenv
+	return os.Getenv(key)
+}
+
 // runClaude executes the Claude CLI in the container interactively
-func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool) error {
+func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
+	// Determine which Claude binary to use (real or test)
+	claudeBinary := "claude"
+	if getEnvValue("COI_USE_TEST_CLAUDE") == "1" {
+		claudeBinary = "test-claude"
+		fmt.Fprintf(os.Stderr, "Using test-claude (fake Claude) for faster testing\n")
+	}
+
 	// Build command - either bash for debugging or Claude CLI
 	var cmdToRun string
 	if debugShell {
 		// Debug mode: launch interactive bash
 		cmdToRun = "bash"
 	} else {
-		// Interactive mode
-		// In sandbox mode, use permission-mode bypassPermissions to skip all prompts
-		// Including the initial acknowledgment warning
-		permissionFlags := ""
-		if !privileged {
-			permissionFlags = "--permission-mode bypassPermissions "
-		}
+		// Always use permission-mode bypassPermissions to skip all prompts
+		permissionFlags := "--permission-mode bypassPermissions "
+
 		// Build session flag:
-		// - useResumeFlag: use --resume for persistent containers
-		// - restoreOnly: no session flag, let Claude auto-detect from restored .claude
+		// - useResumeFlag or restoreOnly: use --resume with Claude's session ID
 		// - neither: use --session-id for new sessions
 		var sessionArg string
-		if useResumeFlag {
-			sessionArg = fmt.Sprintf(" --resume %s", sessionID)
-		} else if !restoreOnly {
+		if useResumeFlag || restoreOnly {
+			// Resume mode: find Claude's session ID from saved data
+			claudeSessionID := session.GetClaudeSessionID(sessionsDir, resumeID)
+			if claudeSessionID != "" {
+				sessionArg = fmt.Sprintf(" --resume %s", claudeSessionID)
+			} else {
+				// Fallback to auto-detect if we can't find the session ID
+				sessionArg = " --resume"
+			}
+		} else {
 			sessionArg = fmt.Sprintf(" --session-id %s", sessionID)
 		}
 
-		cmdToRun = fmt.Sprintf("claude --verbose %s%s", permissionFlags, sessionArg)
+		cmdToRun = fmt.Sprintf("%s --verbose %s%s", claudeBinary, permissionFlags, sessionArg)
 	}
 
 	// Execute in container
-	user := container.ClaudeUID
+	user := container.CodeUID
 	if result.RunAsRoot {
 		user = 0
 	}
@@ -301,20 +327,24 @@ func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, res
 	userPtr := &user
 
 	// Build environment variables
-	envVars := map[string]string{
-		"HOME": result.HomeDir,
-		"TERM": os.Getenv("TERM"), // Preserve terminal type
+	containerEnv := map[string]string{
+		"HOME":       result.HomeDir,
+		"TERM":       os.Getenv("TERM"), // Preserve terminal type
+		"IS_SANDBOX": "1",               // Always set sandbox mode
 	}
 
-	// Set IS_SANDBOX=1 in sandbox mode (non-privileged) so Claude knows it's sandboxed
-	if !privileged {
-		envVars["IS_SANDBOX"] = "1"
+	// Merge user-provided --env vars
+	for _, e := range envVars {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			containerEnv[parts[0]] = parts[1]
+		}
 	}
 
 	opts := container.ExecCommandOptions{
 		User:        userPtr,
 		Cwd:         "/workspace",
-		Env:         envVars,
+		Env:         containerEnv,
 		Interactive: true, // Attach stdin/stdout/stderr for interactive session
 	}
 
@@ -323,8 +353,15 @@ func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, res
 }
 
 // runClaudeInTmux executes Claude CLI in a tmux session for background/monitoring support
-func runClaudeInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool) error {
+func runClaudeInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
 	tmuxSessionName := fmt.Sprintf("coi-%s", result.ContainerName)
+
+	// Determine which Claude binary to use (real or test)
+	claudeBinary := "claude"
+	if getEnvValue("COI_USE_TEST_CLAUDE") == "1" {
+		claudeBinary = "test-claude"
+		fmt.Fprintf(os.Stderr, "Using test-claude (fake Claude) for faster testing\n")
+	}
 
 	// Build Claude command
 	var claudeCmd string
@@ -332,27 +369,31 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 		// Debug mode: launch interactive bash
 		claudeCmd = "bash"
 	} else {
-		// Interactive mode
-		permissionFlags := ""
-		if !privileged {
-			permissionFlags = "--permission-mode bypassPermissions "
-		}
+		// Always use permission-mode bypassPermissions
+		permissionFlags := "--permission-mode bypassPermissions "
+
 		// Build session flag:
-		// - useResumeFlag: use --resume for persistent containers
-		// - restoreOnly: no session flag, let Claude auto-detect from restored .claude
+		// - useResumeFlag or restoreOnly: use --resume with Claude's session ID
 		// - neither: use --session-id for new sessions
 		var sessionArg string
-		if useResumeFlag {
-			sessionArg = fmt.Sprintf(" --resume %s", sessionID)
-		} else if !restoreOnly {
+		if useResumeFlag || restoreOnly {
+			// Resume mode: find Claude's session ID from saved data
+			claudeSessionID := session.GetClaudeSessionID(sessionsDir, resumeID)
+			if claudeSessionID != "" {
+				sessionArg = fmt.Sprintf(" --resume %s", claudeSessionID)
+			} else {
+				// Fallback to auto-detect if we can't find the session ID
+				sessionArg = " --resume"
+			}
+		} else {
 			sessionArg = fmt.Sprintf(" --session-id %s", sessionID)
 		}
 
-		claudeCmd = fmt.Sprintf("claude --verbose %s%s", permissionFlags, sessionArg)
+		claudeCmd = fmt.Sprintf("%s --verbose %s%s", claudeBinary, permissionFlags, sessionArg)
 	}
 
 	// Build environment variables
-	user := container.ClaudeUID
+	user := container.CodeUID
 	if result.RunAsRoot {
 		user = 0
 	}
@@ -364,18 +405,23 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 		termEnv = "xterm-256color" // Fallback to widely compatible terminal
 	}
 
-	envVars := map[string]string{
-		"HOME": result.HomeDir,
-		"TERM": termEnv,
+	containerEnv := map[string]string{
+		"HOME":       result.HomeDir,
+		"TERM":       termEnv,
+		"IS_SANDBOX": "1", // Always set sandbox mode
 	}
 
-	if !privileged {
-		envVars["IS_SANDBOX"] = "1"
+	// Merge user-provided --env vars
+	for _, e := range envVars {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			containerEnv[parts[0]] = parts[1]
+		}
 	}
 
 	// Build environment export commands for tmux
 	envExports := ""
-	for k, v := range envVars {
+	for k, v := range containerEnv {
 		envExports += fmt.Sprintf("export %s=%q; ", k, v)
 	}
 
@@ -416,10 +462,13 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 	}
 
 	// Create new tmux session
+	// When claude exits, fall back to bash so user can still interact
+	// User can then: exit (leaves container running), Ctrl+b d (detach), or sudo shutdown 0 (stop)
+	// Use trap to prevent bash from exiting on SIGINT while allowing Ctrl+C to work in claude
 	if detached {
 		// Background mode: create detached session
 		createCmd := fmt.Sprintf(
-			"tmux new-session -d -s %s -c /workspace 'cd /workspace && %s %s'",
+			"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
 			tmuxSessionName,
 			envExports,
 			claudeCmd,
@@ -439,8 +488,9 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 		return nil
 	} else {
 		// Interactive mode: create session and attach
+		// trap : INT prevents bash from exiting on Ctrl+C, exec bash replaces (no nested shells)
 		createCmd := fmt.Sprintf(
-			"tmux new-session -s %s -c /workspace '%s %s'",
+			"tmux new-session -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
 			tmuxSessionName,
 			envExports,
 			claudeCmd,
@@ -449,10 +499,9 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 			User:        userPtr,
 			Cwd:         "/workspace",
 			Interactive: true,
-			Env:         envVars,
+			Env:         containerEnv,
 		}
 		_, err := result.Manager.ExecCommand(createCmd, opts)
 		return err
 	}
 }
-
