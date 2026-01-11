@@ -17,11 +17,17 @@ if tests_dir not in sys.path:
 @pytest.fixture(scope="session")
 def coi_binary():
     """Return path to coi binary."""
+    # Check COI_BINARY env var first (for CI)
+    if "COI_BINARY" in os.environ:
+        binary_path = os.environ["COI_BINARY"]
+        if os.path.exists(binary_path):
+            return os.path.abspath(binary_path)
+
     # Look for coi binary in project root
     binary_path = os.path.join(os.path.dirname(__file__), "..", "coi")
     if not os.path.exists(binary_path):
         pytest.skip("coi binary not found - run 'make build' first")
-    return binary_path
+    return os.path.abspath(binary_path)
 
 
 @pytest.fixture
