@@ -79,6 +79,28 @@ jobs:
           # Initialize Incus with default settings
           sudo incus admin init --auto
 
+          # Verify network and profile configuration
+          echo "=== Incus network configuration ==="
+          incus network list
+          incus network show incusbr0 || echo "incusbr0 not found"
+
+          echo ""
+          echo "=== Incus default profile ==="
+          incus profile show default
+
+          echo ""
+          echo "=== Incus info ==="
+          incus info
+
+          # Ensure NAT is enabled on the bridge (should be default, but let's be explicit)
+          echo ""
+          echo "=== Configuring incusbr0 NAT ==="
+          incus network set incusbr0 ipv4.nat=true
+          incus network set incusbr0 ipv6.nat=true
+
+          echo "=== Updated incusbr0 configuration ==="
+          incus network show incusbr0
+
           # Add current user to incus-admin group
           sudo usermod -aG incus-admin $USER
 
@@ -114,12 +136,20 @@ jobs:
           DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
           echo "Default interface: $DEFAULT_IFACE"
 
-          # Docker sets FORWARD policy to DROP - change to ACCEPT
-          sudo iptables -P FORWARD ACCEPT
-
-          # Allow forwarding for Incus bridge (insert at top of chain)
-          sudo iptables -I FORWARD 1 -i incusbr0 -j ACCEPT
-          sudo iptables -I FORWARD 1 -o incusbr0 -j ACCEPT
+          # Use DOCKER-USER chain (Docker won't interfere with this chain)
+          # This is the same approach as canonical/setup-lxd
+          echo ""
+          echo "Checking for DOCKER-USER chain..."
+          if sudo iptables -nL DOCKER-USER 2>/dev/null; then
+            echo "DOCKER-USER chain exists - adding Incus bridge rules"
+            sudo iptables -I DOCKER-USER -i incusbr0 -j ACCEPT
+            sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          else
+            echo "DOCKER-USER chain not found - using FORWARD chain"
+            sudo iptables -P FORWARD ACCEPT
+            sudo iptables -I FORWARD 1 -i incusbr0 -j ACCEPT
+            sudo iptables -I FORWARD 1 -o incusbr0 -j ACCEPT
+          fi
 
           # Add NAT rules for Incus (prepend to ensure they're evaluated first)
           # Don't flush - preserve Docker's rules
@@ -136,6 +166,9 @@ jobs:
 
           echo ""
           echo "=== Verifying iptables rules ==="
+          echo "DOCKER-USER chain (all rules):"
+          sudo iptables -L DOCKER-USER -v -n --line-numbers 2>/dev/null || echo "  DOCKER-USER chain not found"
+          echo ""
           echo "FORWARD chain (first 30 rules):"
           sudo iptables -L FORWARD -v -n --line-numbers | head -35
           echo ""
@@ -193,8 +226,37 @@ jobs:
           sudo iptables -t nat -Z
 
           # Check container has IP
+          echo ""
           echo "Container IP addresses:"
           incus exec network-test -- ip addr show eth0 || true
+
+          # Get container IP for testing from host
+          CONTAINER_IP=$(incus exec network-test -- ip -4 addr show eth0 | grep -oP 'inet \K[\d.]+' | head -1)
+          echo ""
+          echo "Container IP: $CONTAINER_IP"
+
+          echo ""
+          echo "=== Testing bridge connectivity from HOST ==="
+          BRIDGE_IP=$(ip addr show incusbr0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
+          echo "Bridge IP: $BRIDGE_IP"
+
+          echo ""
+          echo "Can host ping the incus bridge IP?"
+          if ping -c 2 -W 3 $BRIDGE_IP; then
+            echo "  ✓ Host can reach bridge"
+          else
+            echo "  ✗ Host cannot ping bridge"
+          fi
+
+          echo ""
+          echo "Can host ping the container ($CONTAINER_IP)?"
+          if ping -c 2 -W 3 $CONTAINER_IP; then
+            echo "  ✓ Host can reach container"
+          else
+            echo "  ✗ Host cannot reach container (bridge not forwarding?)"
+          fi
+
+          echo ""
 
           # Check container routing
           echo "Container routes:"
@@ -207,8 +269,17 @@ jobs:
           # Test connectivity with multiple methods
           echo "Testing connectivity..."
 
-          echo "1. Can ping gateway?"
-          incus exec network-test -- ping -c 2 10.102.147.1 || echo "  ✗ Cannot ping gateway"
+          # Get the actual gateway IP from the container's routing table
+          GATEWAY_IP=$(incus exec network-test -- ip route show default | awk '{print $3}' | head -1)
+          echo "Container gateway: $GATEWAY_IP"
+
+          echo ""
+          echo "1. Can ping gateway ($GATEWAY_IP)?"
+          if incus exec network-test -- ping -c 2 -W 3 $GATEWAY_IP; then
+            echo "  ✓ Can reach gateway"
+          else
+            echo "  ✗ Cannot ping gateway - bridge/forwarding issue"
+          fi
 
           echo ""
           echo "2. Can ping archive.ubuntu.com (ICMP)?"
