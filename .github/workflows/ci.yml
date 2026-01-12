@@ -80,8 +80,42 @@ jobs:
           sudo systemctl start incus.socket || true
           sleep 5
 
-          # Initialize Incus with default settings
-          sudo incus admin init --auto
+          # Initialize Incus with btrfs storage (faster than default dir storage)
+          # Using preseed for explicit configuration
+          # Get current user's UID and GID for proper mapping
+          RUNNER_UID=$(id -u)
+          RUNNER_GID=$(id -g)
+
+          cat <<EOF | sudo incus admin init --preseed
+          config:
+            images.compression_algorithm: none
+          networks:
+          - config:
+              ipv4.address: auto
+              ipv6.address: auto
+            name: incusbr0
+            type: bridge
+          storage_pools:
+          - config:
+              size: 5GiB
+            name: default
+            driver: btrfs
+          profiles:
+          - config:
+              raw.idmap: |
+                uid ${RUNNER_UID} 0
+                gid ${RUNNER_GID} 0
+            devices:
+              eth0:
+                name: eth0
+                network: incusbr0
+                type: nic
+              root:
+                path: /
+                pool: default
+                type: disk
+            name: default
+          EOF
 
           # Allow access without re-login by changing socket permissions
           sudo chmod 666 /var/lib/incus/unix.socket
@@ -125,6 +159,13 @@ jobs:
           sudo iptables -t nat -I POSTROUTING 1 -s 172.16.0.0/12 ! -d 172.16.0.0/12 -o $DEFAULT_IFACE -j MASQUERADE
           sudo iptables -t nat -I POSTROUTING 1 -s 192.168.0.0/16 ! -d 192.168.0.0/16 -o $DEFAULT_IFACE -j MASQUERADE
 
+      - name: Pre-cache base Ubuntu image
+        run: |
+          # Pre-download the base image to speed up builds
+          echo "Pre-caching Ubuntu 22.04 base image..."
+          incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04 --auto-update=false || true
+          incus image list
+
       - name: Build COI binary
         run: |
           go build -o coi ./cmd/coi
@@ -155,11 +196,8 @@ jobs:
 
       - name: Run integration tests
         run: |
-          # Run ephemeral tests
-          python -m pytest tests/shell/ephemeral/ -v --tb=short
-
-          # Run persistent tests
-          python -m pytest tests/shell/persistent/ -v --tb=short
+          # Run all tests
+          python -m pytest tests/ -v --tb=short
         env:
           COI_BINARY: ./coi
 

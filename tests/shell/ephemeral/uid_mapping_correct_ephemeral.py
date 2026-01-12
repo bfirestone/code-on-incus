@@ -107,7 +107,21 @@ def test_uid_mapping_correct(coi_binary, cleanup_containers, workspace_dir):
     # === Phase 4: Verify file ownership on host ===
 
     file_path = os.path.join(workspace_dir, test_filename)
-    
+
+    # Debug: List all files in workspace
+    if not os.path.exists(file_path):
+        print(f"\n=== DEBUG: File not found at {file_path} ===")
+        print(f"Workspace dir contents:")
+        try:
+            for item in os.listdir(workspace_dir):
+                item_path = os.path.join(workspace_dir, item)
+                stat_info = os.stat(item_path)
+                print(f"  {item} (uid={stat_info.st_uid}, gid={stat_info.st_gid}, mode={oct(stat_info.st_mode)})")
+        except Exception as e:
+            print(f"  Error listing: {e}")
+        print(f"Current user: uid={current_uid}, gid={os.getgid()}")
+        print("===")
+
     assert os.path.exists(file_path), \
         f"File {test_filename} should exist on host"
 

@@ -162,7 +162,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		ResumeFromID:     resumeID,
 		Slot:             slotNum,
 		SessionsDir:      sessionsDir,
-		ClaudeConfigPath: filepath.Join(homeDir, ".claude"),
+		CLIConfigPath: filepath.Join(homeDir, ".claude"),
 	}
 
 	if storage != "" {
@@ -234,7 +234,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
 		}
 		fmt.Fprintf(os.Stderr, "\n")
-		err = runClaudeInTmux(result, sessionID, background, useResumeFlag, restoreOnly, sessionsDir, resumeID)
+		err = runCLIInTmux(result, sessionID, background, useResumeFlag, restoreOnly, sessionsDir, resumeID)
 	} else {
 		fmt.Fprintf(os.Stderr, "Mode: Direct (no tmux)\n")
 		if restoreOnly {
@@ -243,7 +243,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
 		}
 		fmt.Fprintf(os.Stderr, "\n")
-		err = runClaude(result, sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID)
+		err = runCLI(result, sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID)
 	}
 
 	// Handle expected exit conditions gracefully
@@ -280,16 +280,16 @@ func getEnvValue(key string) string {
 	return os.Getenv(key)
 }
 
-// runClaude executes the Claude CLI in the container interactively
-func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
-	// Determine which Claude binary to use (real or dummy)
-	claudeBinary := "claude"
+// runCLI executes the CLI tool in the container interactively
+func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
+	// Determine which CLI binary to use (real or dummy)
+	cliBinary := "claude"
 	if getEnvValue("COI_USE_DUMMY") == "1" {
-		claudeBinary = "dummy"
+		cliBinary = "dummy"
 		fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
 	}
 
-	// Build command - either bash for debugging or Claude CLI
+	// Build command - either bash for debugging or CLI tool
 	var cmdToRun string
 	if debugShell {
 		// Debug mode: launch interactive bash
@@ -299,14 +299,14 @@ func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, res
 		permissionFlags := "--permission-mode bypassPermissions "
 
 		// Build session flag:
-		// - useResumeFlag or restoreOnly: use --resume with Claude's session ID
+		// - useResumeFlag or restoreOnly: use --resume with CLI's session ID
 		// - neither: use --session-id for new sessions
 		var sessionArg string
 		if useResumeFlag || restoreOnly {
-			// Resume mode: find Claude's session ID from saved data
-			claudeSessionID := session.GetClaudeSessionID(sessionsDir, resumeID)
-			if claudeSessionID != "" {
-				sessionArg = fmt.Sprintf(" --resume %s", claudeSessionID)
+			// Resume mode: find CLI's session ID from saved data
+			cliSessionID := session.GetCLISessionID(sessionsDir, resumeID)
+			if cliSessionID != "" {
+				sessionArg = fmt.Sprintf(" --resume %s", cliSessionID)
 			} else {
 				// Fallback to auto-detect if we can't find the session ID
 				sessionArg = " --resume"
@@ -315,7 +315,7 @@ func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, res
 			sessionArg = fmt.Sprintf(" --session-id %s", sessionID)
 		}
 
-		cmdToRun = fmt.Sprintf("%s --verbose %s%s", claudeBinary, permissionFlags, sessionArg)
+		cmdToRun = fmt.Sprintf("%s --verbose %s%s", cliBinary, permissionFlags, sessionArg)
 	}
 
 	// Execute in container
@@ -352,35 +352,35 @@ func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, res
 	return err
 }
 
-// runClaudeInTmux executes Claude CLI in a tmux session for background/monitoring support
-func runClaudeInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
+// runCLIInTmux executes CLI tool in a tmux session for background/monitoring support
+func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
 	tmuxSessionName := fmt.Sprintf("coi-%s", result.ContainerName)
 
-	// Determine which Claude binary to use (real or dummy)
-	claudeBinary := "claude"
+	// Determine which CLI binary to use (real or dummy)
+	cliBinary := "claude"
 	if getEnvValue("COI_USE_DUMMY") == "1" {
-		claudeBinary = "dummy"
+		cliBinary = "dummy"
 		fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
 	}
 
-	// Build Claude command
-	var claudeCmd string
+	// Build CLI command
+	var cliCmd string
 	if debugShell {
 		// Debug mode: launch interactive bash
-		claudeCmd = "bash"
+		cliCmd = "bash"
 	} else {
 		// Always use permission-mode bypassPermissions
 		permissionFlags := "--permission-mode bypassPermissions "
 
 		// Build session flag:
-		// - useResumeFlag or restoreOnly: use --resume with Claude's session ID
+		// - useResumeFlag or restoreOnly: use --resume with CLI's session ID
 		// - neither: use --session-id for new sessions
 		var sessionArg string
 		if useResumeFlag || restoreOnly {
-			// Resume mode: find Claude's session ID from saved data
-			claudeSessionID := session.GetClaudeSessionID(sessionsDir, resumeID)
-			if claudeSessionID != "" {
-				sessionArg = fmt.Sprintf(" --resume %s", claudeSessionID)
+			// Resume mode: find CLI's session ID from saved data
+			cliSessionID := session.GetCLISessionID(sessionsDir, resumeID)
+			if cliSessionID != "" {
+				sessionArg = fmt.Sprintf(" --resume %s", cliSessionID)
 			} else {
 				// Fallback to auto-detect if we can't find the session ID
 				sessionArg = " --resume"
@@ -389,7 +389,7 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 			sessionArg = fmt.Sprintf(" --session-id %s", sessionID)
 		}
 
-		claudeCmd = fmt.Sprintf("%s --verbose %s%s", claudeBinary, permissionFlags, sessionArg)
+		cliCmd = fmt.Sprintf("%s --verbose %s%s", cliBinary, permissionFlags, sessionArg)
 	}
 
 	// Build environment variables
@@ -436,7 +436,7 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 		// Session exists - attach or send command
 		if detached {
 			// Send command to existing session
-			sendCmd := fmt.Sprintf("tmux send-keys -t %s %q Enter", tmuxSessionName, claudeCmd)
+			sendCmd := fmt.Sprintf("tmux send-keys -t %s %q Enter", tmuxSessionName, cliCmd)
 			_, err := result.Manager.ExecCommand(sendCmd, container.ExecCommandOptions{
 				Capture: true,
 				User:    userPtr,
@@ -471,7 +471,7 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 			"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
 			tmuxSessionName,
 			envExports,
-			claudeCmd,
+			cliCmd,
 		)
 		opts := container.ExecCommandOptions{
 			Capture: true,
@@ -493,7 +493,7 @@ func runClaudeInTmux(result *session.SetupResult, sessionID string, detached boo
 			"tmux new-session -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
 			tmuxSessionName,
 			envExports,
-			claudeCmd,
+			cliCmd,
 		)
 		opts := container.ExecCommandOptions{
 			User:        userPtr,

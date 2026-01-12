@@ -373,10 +373,10 @@ func extractJSONValue(line string) string {
 	return value
 }
 
-// GetClaudeSessionID extracts Claude's session ID from a saved coi session.
-// Claude stores sessions in .claude/projects/-workspace/<session-id>.jsonl
+// GetCLISessionID extracts the CLI tool's session ID from a saved coi session.
+// CLI tools store sessions in .claude/projects/-workspace/<session-id>.jsonl
 // Returns empty string if no session found.
-func GetClaudeSessionID(sessionsDir, coiSessionID string) string {
+func GetCLISessionID(sessionsDir, coiSessionID string) string {
 	projectsDir := filepath.Join(sessionsDir, coiSessionID, ".claude", "projects", "-workspace")
 
 	entries, err := os.ReadDir(projectsDir)

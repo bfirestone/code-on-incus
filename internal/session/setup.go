@@ -22,9 +22,9 @@ type SetupOptions struct {
 	ResumeFromID     string
 	Slot             int
 	StoragePath      string
-	SessionsDir      string // e.g., ~/.claude-on-incus/sessions
-	ClaudeConfigPath string // e.g., ~/.claude (host Claude config to copy credentials from)
-	Logger           func(string)
+	SessionsDir   string // e.g., ~/.claude-on-incus/sessions
+	CLIConfigPath string // e.g., ~/.claude (host CLI config to copy credentials from)
+	Logger        func(string)
 }
 
 // SetupResult contains the result of setup
@@ -151,8 +151,8 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 
 		// Always inject fresh credentials when resuming (whether persistent container or restored session)
-		if opts.ClaudeConfigPath != "" {
-			if err := injectCredentials(result.Manager, opts.ClaudeConfigPath, result.HomeDir, opts.Logger); err != nil {
+		if opts.CLIConfigPath != "" {
+			if err := injectCredentials(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Logger); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Could not inject credentials: %v", err))
 			}
 		}
@@ -180,14 +180,14 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	}
 
 	// 10. Setup Claude config (skip if resuming - .claude already restored)
-	if opts.ClaudeConfigPath != "" && opts.ResumeFromID == "" {
+	if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
 		// Check if host .claude directory exists
-		if _, err := os.Stat(opts.ClaudeConfigPath); err == nil {
+		if _, err := os.Stat(opts.CLIConfigPath); err == nil {
 			// Copy and inject settings (but only if NOT resuming)
 			// Only run on first launch, not when restarting persistent container
 			if !skipLaunch {
 				opts.Logger("Setting up Claude config...")
-				if err := setupClaudeConfig(result.Manager, opts.ClaudeConfigPath, result.HomeDir, opts.Logger); err != nil {
+				if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Logger); err != nil {
 					opts.Logger(fmt.Sprintf("Warning: Failed to setup Claude config: %v", err))
 				}
 			} else {
@@ -263,11 +263,11 @@ func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir s
 
 // injectCredentials copies credentials and essential config from host to container when resuming
 // This ensures fresh authentication while preserving the session conversation history
-func injectCredentials(mgr *container.Manager, hostClaudeConfigPath, homeDir string, logger func(string)) error {
+func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string, logger func(string)) error {
 	logger("Injecting fresh credentials and config for session resume...")
 
 	// Copy .credentials.json from host to container
-	credentialsPath := filepath.Join(hostClaudeConfigPath, ".credentials.json")
+	credentialsPath := filepath.Join(hostCLIConfigPath, ".credentials.json")
 	if _, err := os.Stat(credentialsPath); err != nil {
 		return fmt.Errorf("credentials file not found: %w", err)
 	}
@@ -286,7 +286,7 @@ func injectCredentials(mgr *container.Manager, hostClaudeConfigPath, homeDir str
 
 	// Also copy .claude.json (sibling to .claude directory) if it exists
 	// This file contains important config like theme, startup count, etc.
-	claudeJsonPath := filepath.Join(filepath.Dir(hostClaudeConfigPath), ".claude.json")
+	claudeJsonPath := filepath.Join(filepath.Dir(hostCLIConfigPath), ".claude.json")
 	if _, err := os.Stat(claudeJsonPath); err == nil {
 		logger("Copying .claude.json for session resume...")
 		claudeJsonDest := filepath.Join(homeDir, ".claude.json")
@@ -316,8 +316,8 @@ func injectCredentials(mgr *container.Manager, hostClaudeConfigPath, homeDir str
 	return nil
 }
 
-// setupClaudeConfig copies .claude directory and injects sandbox settings
-func setupClaudeConfig(mgr *container.Manager, hostClaudePath, homeDir string, logger func(string)) error {
+// setupCLIConfig copies .claude directory and injects sandbox settings
+func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, logger func(string)) error {
 	claudeDir := filepath.Join(homeDir, ".claude")
 
 	// Create .claude directory in container
@@ -334,9 +334,9 @@ func setupClaudeConfig(mgr *container.Manager, hostClaudePath, homeDir string, l
 		"settings.json",
 	}
 
-	logger(fmt.Sprintf("Copying essential Claude config files from %s", hostClaudePath))
+	logger(fmt.Sprintf("Copying essential CLI config files from %s", hostCLIConfigPath))
 	for _, filename := range essentialFiles {
-		srcPath := filepath.Join(hostClaudePath, filename)
+		srcPath := filepath.Join(hostCLIConfigPath, filename)
 		if _, err := os.Stat(srcPath); err == nil {
 			destPath := filepath.Join(claudeDir, filename)
 			logger(fmt.Sprintf("  - Copying %s", filename))
@@ -366,7 +366,7 @@ func setupClaudeConfig(mgr *container.Manager, hostClaudePath, homeDir string, l
 	logger("Claude config copied and sandbox settings injected in settings.json")
 
 	// Copy and modify .claude.json (sibling to .claude directory)
-	claudeJsonPath := filepath.Join(filepath.Dir(hostClaudePath), ".claude.json")
+	claudeJsonPath := filepath.Join(filepath.Dir(hostCLIConfigPath), ".claude.json")
 	logger(fmt.Sprintf("Checking for .claude.json at: %s", claudeJsonPath))
 
 	if info, err := os.Stat(claudeJsonPath); err == nil {

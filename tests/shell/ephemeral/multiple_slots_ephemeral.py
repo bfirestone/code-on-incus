@@ -10,6 +10,7 @@ Tests that:
 6. Cleanup both containers
 """
 
+import os
 import subprocess
 import time
 
@@ -55,8 +56,13 @@ def test_multiple_slots_parallel(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    wait_for_container_ready(child1, timeout=60)
-    wait_for_prompt(child1, timeout=90)
+    # Use longer timeouts in CI environments (they're slower)
+    is_ci = os.getenv('CI') == 'true' or os.getenv('GITHUB_ACTIONS') == 'true'
+    container_timeout = 120 if is_ci else 60
+    prompt_timeout = 180 if is_ci else 90
+
+    wait_for_container_ready(child1, timeout=container_timeout)
+    wait_for_prompt(child1, timeout=prompt_timeout)
 
     # Verify slot 1 container exists
     containers = get_container_list()
