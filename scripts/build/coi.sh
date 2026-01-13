@@ -68,14 +68,36 @@ create_code_user() {
     # Setup passwordless sudo for all commands
     echo "$CODE_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$CODE_USER"
 
-    # Also explicitly allow shutdown/poweroff/reboot with passwordless sudo
-    echo "$CODE_USER ALL=(ALL) NOPASSWD: /sbin/shutdown, /sbin/poweroff, /sbin/reboot" >> "/etc/sudoers.d/$CODE_USER"
-
     chown root:root "/etc/sudoers.d/$CODE_USER"
     chmod 440 "/etc/sudoers.d/$CODE_USER"
     usermod -aG sudo "$CODE_USER"
 
     log "User '$CODE_USER' created with passwordless sudo (uid: $CODE_UID)"
+}
+
+#######################################
+# Configure power management wrappers
+#######################################
+configure_power_wrappers() {
+    log "Configuring power management command wrappers..."
+
+    # Create wrapper scripts that use sudo automatically
+    # This allows users to type "poweroff" instead of "sudo poweroff"
+    # while working around the lack of login sessions in containers
+
+    for cmd in shutdown poweroff reboot halt; do
+        cat > "/usr/local/bin/${cmd}" << 'WRAPPER_EOF'
+#!/bin/bash
+# Wrapper to run power management commands with sudo automatically
+# This works around the lack of login sessions in container environments
+exec sudo /usr/sbin/COMMAND_NAME "$@"
+WRAPPER_EOF
+        # Replace COMMAND_NAME with actual command
+        sed -i "s/COMMAND_NAME/${cmd}/" "/usr/local/bin/${cmd}"
+        chmod 755 "/usr/local/bin/${cmd}"
+    done
+
+    log "Power management wrappers configured"
 }
 
 #######################################
@@ -174,6 +196,7 @@ main() {
     install_base_dependencies
     install_nodejs
     create_code_user
+    configure_power_wrappers
     install_claude_cli
     install_dummy
     install_docker
