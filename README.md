@@ -261,6 +261,24 @@ coi file pull my-container:/workspace/build.log ./build.log
 coi file pull -r my-container:/root/.claude ./saved-sessions/session-123/
 ```
 
+### Tmux Automation
+
+Interact with running Claude sessions for automation workflows:
+
+```bash
+# List all active tmux sessions
+coi tmux list
+
+# Send commands to a running session
+coi tmux send coi-abc12345-1 "write a hello world script"
+coi tmux send coi-abc12345-1 "/exit"
+
+# Capture current output from a session
+coi tmux capture coi-abc12345-1
+```
+
+**Note:** Sessions use tmux internally, so standard tmux commands work after attaching with `coi attach`.
+
 ### Image Management
 
 Advanced image operations:
