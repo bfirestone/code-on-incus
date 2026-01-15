@@ -14,6 +14,7 @@ This validates the complete setup process from scratch.
 Note: This test requires nested Incus support and takes longer to run.
 """
 
+import os
 import subprocess
 import time
 
@@ -157,12 +158,19 @@ def test_full_installation_process(meta_container, coi_binary):
     assert "go version" in result.stdout, "Go installation verification failed"
 
     # Phase 3: Clone repository and build coi
+    # In CI (pull requests), use the PR branch instead of master
+    github_branch = os.environ.get("GITHUB_HEAD_REF", "")
+    if github_branch:
+        clone_cmd = f"git clone -b {github_branch} https://github.com/mensfeld/claude-on-incus.git"
+    else:
+        clone_cmd = "git clone https://github.com/mensfeld/claude-on-incus.git"
+
     result = exec_in_container(
         container_name,
-        """
+        f"""
         set -e
         cd /root
-        git clone https://github.com/mensfeld/claude-on-incus.git
+        {clone_cmd}
         cd claude-on-incus
         /usr/local/go/bin/go build -o coi ./cmd/coi
         ./coi version
@@ -170,7 +178,7 @@ def test_full_installation_process(meta_container, coi_binary):
         timeout=300,
     )
     assert result.returncode == 0, f"Failed to build coi: {result.stderr}"
-    assert "claude-on-incus (coi) v" in result.stdout, "coi version check failed"
+    assert "code-on-incus (coi) v" in result.stdout, "coi version check failed"
 
     # Phase 4: Test coi --help
     result = exec_in_container(
@@ -182,7 +190,7 @@ def test_full_installation_process(meta_container, coi_binary):
         timeout=30,
     )
     assert result.returncode == 0, f"coi --help failed: {result.stderr}"
-    assert "claude-on-incus (coi) is a CLI tool" in result.stdout, (
+    assert "code-on-incus (coi) is a CLI tool" in result.stdout, (
         "coi help output missing expected text"
     )
     assert "Available Commands:" in result.stdout, "coi help missing commands section"
@@ -237,4 +245,4 @@ def test_installation_with_prebuilt_binary(meta_container, coi_binary):
         timeout=30,
     )
     assert result.returncode == 0, f"Pre-built binary test failed: {result.stderr}"
-    assert "claude-on-incus (coi)" in result.stdout, "coi binary not working correctly"
+    assert "code-on-incus (coi)" in result.stdout, "coi binary not working correctly"
