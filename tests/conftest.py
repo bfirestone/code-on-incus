@@ -41,7 +41,7 @@ def workspace_dir(tmp_path):
 
 @pytest.fixture
 def cleanup_containers(workspace_dir, coi_binary):
-    """Cleanup test containers after each test."""
+    """Cleanup test containers and associated network resources after each test."""
     # Import here to avoid circular imports
     from support.helpers import calculate_container_name, get_container_list
 
@@ -56,6 +56,8 @@ def cleanup_containers(workspace_dir, coi_binary):
     containers = get_container_list()
     for container in containers:
         if container in workspace_containers:
+            # Delete the container
+            # Note: ACLs are already cleaned up by coi shell cleanup when it exits
             subprocess.run(
                 [coi_binary, "container", "delete", container, "--force"],
                 capture_output=True,

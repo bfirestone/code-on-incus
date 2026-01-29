@@ -108,9 +108,14 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
     except Exception:
         child.close(force=True)
 
-    # Wait for container deletion
-    container_deleted = wait_for_specific_container_deletion(container_name, timeout=30)
-    assert container_deleted, f"Container {container_name} should be deleted"
+    # Give cleanup process time to detect stopped container and initiate deletion
+    # The cleanup loop checks if container is stopped (up to 5s), then saves session
+    # data, then starts container deletion
+    time.sleep(5)
+
+    # Wait for container deletion (60s to account for OVN network teardown)
+    container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
+    assert container_deleted, f"Container {container_name} should be deleted (waited 60s)"
 
     # === Phase 2: Resume and verify file is gone ===
 
@@ -170,9 +175,12 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
     except Exception:
         child2.close(force=True)
 
-    # Wait for cleanup
+    # Give cleanup process time to detect stopped container and initiate deletion
+    time.sleep(5)
+
+    # Wait for cleanup (60s to account for OVN network teardown)
     container_name2 = calculate_container_name(workspace_dir, 1)
-    wait_for_specific_container_deletion(container_name2, timeout=30)
+    wait_for_specific_container_deletion(container_name2, timeout=60)
 
     # Force cleanup any remaining
     containers = get_container_list()
