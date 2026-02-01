@@ -56,6 +56,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["incus"] = CheckIncus()
 	checks["permissions"] = CheckPermissions()
 	checks["image"] = CheckImage(cfg.Defaults.Image)
+	checks["image_age"] = CheckImageAge(cfg.Defaults.Image)
 
 	// Networking checks
 	checks["network_bridge"] = CheckNetworkBridge()
@@ -65,13 +66,19 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	// Storage checks
 	checks["coi_directory"] = CheckCOIDirectory()
 	checks["sessions_directory"] = CheckSessionsDirectory(cfg)
+	checks["disk_space"] = CheckDiskSpace()
 
 	// Configuration checks
 	checks["config"] = CheckConfiguration(cfg)
 	checks["network_mode"] = CheckNetworkMode(cfg.Network.Mode)
 	checks["tool"] = CheckTool(cfg.Tool.Name)
+	checks["api_key"] = CheckAPIKey()
 
-	// DNS check (optional, only if verbose)
+	// Status checks
+	checks["active_containers"] = CheckActiveContainers()
+	checks["saved_sessions"] = CheckSavedSessions(cfg)
+
+	// Optional checks (only if verbose)
 	if verbose {
 		checks["dns_resolution"] = CheckDNS()
 		checks["passwordless_sudo"] = CheckPasswordlessSudo()

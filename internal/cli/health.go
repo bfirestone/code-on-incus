@@ -88,15 +88,16 @@ func outputHealthText(result *health.HealthResult) error {
 
 	// Group checks by category
 	categories := map[string][]string{
-		"CRITICAL":      {"incus", "permissions", "image"},
+		"CRITICAL":      {"incus", "permissions", "image", "image_age"},
 		"NETWORKING":    {"network_bridge", "ip_forwarding", "firewall"},
-		"STORAGE":       {"coi_directory", "sessions_directory"},
-		"CONFIGURATION": {"config", "network_mode", "tool"},
+		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space"},
+		"CONFIGURATION": {"config", "network_mode", "tool", "api_key"},
+		"STATUS":        {"active_containers", "saved_sessions"},
 		"OPTIONAL":      {"dns_resolution", "passwordless_sudo"},
 	}
 
 	// Category order
-	categoryOrder := []string{"CRITICAL", "NETWORKING", "STORAGE", "CONFIGURATION", "OPTIONAL"}
+	categoryOrder := []string{"CRITICAL", "NETWORKING", "STORAGE", "CONFIGURATION", "STATUS", "OPTIONAL"}
 
 	for _, category := range categoryOrder {
 		checkNames := categories[category]
@@ -203,14 +204,19 @@ func formatCheckName(name string) string {
 		"incus":              "Incus",
 		"permissions":        "Permissions",
 		"image":              "Default image",
+		"image_age":          "Image age",
 		"network_bridge":     "Network bridge",
 		"ip_forwarding":      "IP forwarding",
 		"firewall":           "Firewalld",
 		"coi_directory":      "COI directory",
-		"sessions_directory": "Sessions",
+		"sessions_directory": "Sessions dir",
+		"disk_space":         "Disk space",
 		"config":             "Config loaded",
 		"network_mode":       "Network mode",
 		"tool":               "Tool",
+		"api_key":            "API key",
+		"active_containers":  "Containers",
+		"saved_sessions":     "Saved sessions",
 		"dns_resolution":     "DNS resolution",
 		"passwordless_sudo":  "Passwordless sudo",
 	}

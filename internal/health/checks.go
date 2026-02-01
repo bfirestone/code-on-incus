@@ -1,6 +1,7 @@
 package health
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -611,5 +614,281 @@ func CheckPasswordlessSudo() HealthCheck {
 		Name:    "passwordless_sudo",
 		Status:  StatusOK,
 		Message: "Configured for firewall-cmd",
+	}
+}
+
+// CheckDiskSpace checks available disk space in ~/.coi directory
+func CheckDiskSpace() HealthCheck {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return HealthCheck{
+			Name:    "disk_space",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not determine home directory: %v", err),
+		}
+	}
+
+	coiDir := filepath.Join(homeDir, ".coi")
+
+	// Use the parent directory if .coi doesn't exist yet
+	checkDir := coiDir
+	if _, err := os.Stat(coiDir); os.IsNotExist(err) {
+		checkDir = homeDir
+	}
+
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(checkDir, &stat); err != nil {
+		return HealthCheck{
+			Name:    "disk_space",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not check disk space: %v", err),
+		}
+	}
+
+	// Calculate available space in bytes
+	// #nosec G115 - Bsize is always positive on real filesystems
+	availableBytes := stat.Bavail * uint64(stat.Bsize)
+	availableGB := float64(availableBytes) / (1024 * 1024 * 1024)
+
+	// Warn if less than 5GB available
+	if availableGB < 5 {
+		return HealthCheck{
+			Name:    "disk_space",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Low disk space: %.1f GB available", availableGB),
+			Details: map[string]interface{}{
+				"available_gb": availableGB,
+				"path":         checkDir,
+			},
+		}
+	}
+
+	return HealthCheck{
+		Name:    "disk_space",
+		Status:  StatusOK,
+		Message: fmt.Sprintf("%.1f GB available", availableGB),
+		Details: map[string]interface{}{
+			"available_gb": availableGB,
+			"path":         checkDir,
+		},
+	}
+}
+
+// CheckActiveContainers counts running COI containers
+func CheckActiveContainers() HealthCheck {
+	prefix := session.GetContainerPrefix()
+	pattern := fmt.Sprintf("^%s", prefix)
+
+	output, err := container.IncusOutput("list", pattern, "--format=json")
+	if err != nil {
+		return HealthCheck{
+			Name:    "active_containers",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not list containers: %v", err),
+		}
+	}
+
+	var containers []map[string]interface{}
+	if err := json.Unmarshal([]byte(output), &containers); err != nil {
+		return HealthCheck{
+			Name:    "active_containers",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not parse container list: %v", err),
+		}
+	}
+
+	// Count running containers
+	running := 0
+	for _, c := range containers {
+		if status, ok := c["status"].(string); ok && status == "Running" {
+			running++
+		}
+	}
+
+	total := len(containers)
+	message := fmt.Sprintf("%d running", running)
+	if total > running {
+		message = fmt.Sprintf("%d running, %d stopped", running, total-running)
+	}
+	if total == 0 {
+		message = "None"
+	}
+
+	return HealthCheck{
+		Name:    "active_containers",
+		Status:  StatusOK,
+		Message: message,
+		Details: map[string]interface{}{
+			"running": running,
+			"total":   total,
+		},
+	}
+}
+
+// CheckSavedSessions counts saved sessions
+func CheckSavedSessions(cfg *config.Config) HealthCheck {
+	// Get configured tool
+	toolName := cfg.Tool.Name
+	if toolName == "" {
+		toolName = "claude"
+	}
+	toolInstance, err := tool.Get(toolName)
+	if err != nil {
+		toolInstance = tool.GetDefault()
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return HealthCheck{
+			Name:    "saved_sessions",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not determine home directory: %v", err),
+		}
+	}
+
+	baseDir := filepath.Join(homeDir, ".coi")
+	sessionsDir := session.GetSessionsDir(baseDir, toolInstance)
+
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return HealthCheck{
+				Name:    "saved_sessions",
+				Status:  StatusOK,
+				Message: "None",
+				Details: map[string]interface{}{
+					"count": 0,
+				},
+			}
+		}
+		return HealthCheck{
+			Name:    "saved_sessions",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not read sessions directory: %v", err),
+		}
+	}
+
+	// Count directories (sessions)
+	count := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			count++
+		}
+	}
+
+	message := fmt.Sprintf("%d session(s)", count)
+	if count == 0 {
+		message = "None"
+	}
+
+	return HealthCheck{
+		Name:    "saved_sessions",
+		Status:  StatusOK,
+		Message: message,
+		Details: map[string]interface{}{
+			"count": count,
+			"path":  sessionsDir,
+		},
+	}
+}
+
+// CheckAPIKey checks if the Anthropic API key is set
+func CheckAPIKey() HealthCheck {
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+
+	if apiKey == "" {
+		return HealthCheck{
+			Name:    "api_key",
+			Status:  StatusWarning,
+			Message: "ANTHROPIC_API_KEY not set (required for Claude)",
+		}
+	}
+
+	// Mask the key for display (show first 4 and last 4 chars)
+	var masked string
+	if len(apiKey) > 12 {
+		masked = apiKey[:4] + "..." + apiKey[len(apiKey)-4:]
+	} else {
+		masked = "****"
+	}
+
+	return HealthCheck{
+		Name:    "api_key",
+		Status:  StatusOK,
+		Message: fmt.Sprintf("Set (%s)", masked),
+		Details: map[string]interface{}{
+			"masked": masked,
+		},
+	}
+}
+
+// CheckImageAge checks if the COI image is outdated
+func CheckImageAge(imageName string) HealthCheck {
+	if imageName == "" {
+		imageName = "coi"
+	}
+
+	// Get image info
+	output, err := container.IncusOutput("image", "list", imageName, "--format=json")
+	if err != nil {
+		return HealthCheck{
+			Name:    "image_age",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not get image info: %v", err),
+		}
+	}
+
+	var images []struct {
+		CreatedAt time.Time `json:"created_at"`
+		Aliases   []struct {
+			Name string `json:"name"`
+		} `json:"aliases"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &images); err != nil {
+		return HealthCheck{
+			Name:    "image_age",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not parse image info: %v", err),
+		}
+	}
+
+	// Find the image
+	for _, img := range images {
+		for _, alias := range img.Aliases {
+			if alias.Name == imageName {
+				age := time.Since(img.CreatedAt)
+				days := int(age.Hours() / 24)
+
+				// Warn if older than 30 days
+				if days > 30 {
+					return HealthCheck{
+						Name:    "image_age",
+						Status:  StatusWarning,
+						Message: fmt.Sprintf("%d days old (consider rebuilding with 'coi build --force')", days),
+						Details: map[string]interface{}{
+							"created_at": img.CreatedAt.Format("2006-01-02"),
+							"age_days":   days,
+						},
+					}
+				}
+
+				return HealthCheck{
+					Name:    "image_age",
+					Status:  StatusOK,
+					Message: fmt.Sprintf("%d days old", days),
+					Details: map[string]interface{}{
+						"created_at": img.CreatedAt.Format("2006-01-02"),
+						"age_days":   days,
+					},
+				}
+			}
+		}
+	}
+
+	return HealthCheck{
+		Name:    "image_age",
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("Image '%s' not found", imageName),
 	}
 }
