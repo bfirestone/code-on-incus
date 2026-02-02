@@ -91,7 +91,7 @@ func outputHealthText(result *health.HealthResult) error {
 		"CRITICAL":      {"incus", "permissions", "image", "image_age"},
 		"NETWORKING":    {"network_bridge", "ip_forwarding", "firewall"},
 		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space"},
-		"CONFIGURATION": {"config", "network_mode", "tool", "api_key"},
+		"CONFIGURATION": {"config", "network_mode", "tool"},
 		"STATUS":        {"active_containers", "saved_sessions"},
 		"OPTIONAL":      {"dns_resolution", "passwordless_sudo"},
 	}
@@ -214,7 +214,6 @@ func formatCheckName(name string) string {
 		"config":             "Config loaded",
 		"network_mode":       "Network mode",
 		"tool":               "Tool",
-		"api_key":            "API key",
 		"active_containers":  "Containers",
 		"saved_sessions":     "Saved sessions",
 		"dns_resolution":     "DNS resolution",

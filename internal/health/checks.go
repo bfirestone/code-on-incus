@@ -792,36 +792,6 @@ func CheckSavedSessions(cfg *config.Config) HealthCheck {
 	}
 }
 
-// CheckAPIKey checks if the Anthropic API key is set
-func CheckAPIKey() HealthCheck {
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-
-	if apiKey == "" {
-		return HealthCheck{
-			Name:    "api_key",
-			Status:  StatusWarning,
-			Message: "ANTHROPIC_API_KEY not set (required for Claude)",
-		}
-	}
-
-	// Mask the key for display (show first 4 and last 4 chars)
-	var masked string
-	if len(apiKey) > 12 {
-		masked = apiKey[:4] + "..." + apiKey[len(apiKey)-4:]
-	} else {
-		masked = "****"
-	}
-
-	return HealthCheck{
-		Name:    "api_key",
-		Status:  StatusOK,
-		Message: fmt.Sprintf("Set (%s)", masked),
-		Details: map[string]interface{}{
-			"masked": masked,
-		},
-	}
-}
-
 // CheckImageAge checks if the COI image is outdated
 func CheckImageAge(imageName string) HealthCheck {
 	if imageName == "" {
