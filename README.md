@@ -86,17 +86,17 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 ### Why Incus Instead of Docker Sandboxes?
 
-**Linux-first, not Linux-last.** Docker Sandboxes' microVM isolation is only available on macOS and Windows. Linux gets a legacy container-based fallback. COI is built for Linux from the ground up because Incus is Linux-native.
+- **Linux-first, not Linux-last.** Docker Sandboxes' microVM isolation is only available on macOS and Windows. Linux gets a legacy container-based fallback. COI is built for Linux from the ground up because Incus is Linux-native.
 
-**No Docker Desktop required.** Docker Sandboxes is a Docker Desktop feature. Docker Desktop is not open source and has commercial licensing requirements for larger organizations. COI depends only on Incus - fully open source, no vendor lock-in, no additional runtime.
+- **No Docker Desktop required.** Docker Sandboxes is a Docker Desktop feature. Docker Desktop is not open source and has commercial licensing requirements for larger organizations. COI depends only on Incus - fully open source, no vendor lock-in, no additional runtime.
 
-**System containers, not containers-in-VMs.** Incus system containers run a full OS with systemd and native Docker support inside - one clean isolation layer. Docker Sandboxes nests application containers inside microVMs, adding architectural complexity.
+- **System containers, not containers-in-VMs.** Incus system containers run a full OS with systemd and native Docker support inside - one clean isolation layer. Docker Sandboxes nests application containers inside microVMs, adding architectural complexity.
 
-**No permission hell.** Incus automatic UID/GID shifting means files created by agents have correct ownership on the host. No `chown`, no mapping hacks.
+- **No permission hell.** Incus automatic UID/GID shifting means files created by agents have correct ownership on the host. No `chown`, no mapping hacks.
 
-**Credential isolation by default.** Host environment variables, SSH keys, and Git credentials are never exposed to AI tools unless explicitly mounted.
+- **Credential isolation by default.** Host environment variables, SSH keys, and Git credentials are never exposed to AI tools unless explicitly mounted.
 
-**Simple and transparent.** No separate daemon, no opaque VM nesting. COI talks directly to Incus - easy to inspect, debug, and extend.
+- **Simple and transparent.** No separate daemon, no opaque VM nesting. COI talks directly to Incus - easy to inspect, debug, and extend.
 
 ### Key Differences from Docker
 
@@ -112,179 +112,13 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 ### Benefits
 
-**No Permission Hell** - Incus automatically maps container UIDs to host UIDs. Files created by AI tools in-container have correct ownership on host. No `chown` needed.
+- **No Permission Hell** - Incus automatically maps container UIDs to host UIDs. Files created by AI tools in-container have correct ownership on host. No `chown` needed.
 
-**True Isolation** - Full system container means AI tools can run Docker, systemd services, etc. Safer than Docker's privileged mode.
+- **True Isolation** - Full system container means AI tools can run Docker, systemd services, etc. Safer than Docker's privileged mode.
 
-**Persistent State** - System containers can be stopped/started without data loss. Ideal for long-running AI coding sessions.
+- **Persistent State** - System containers can be stopped/started without data loss. Ideal for long-running AI coding sessions.
 
-**Resource Efficiency** - Share kernel like Docker, lower overhead than VMs, better density for parallel sessions.
-
-## Frequently Asked Questions
-
-### How is COI different from Docker Sandboxes?
-
-Docker Sandboxes is a Docker Desktop feature that uses microVMs for isolation on macOS/Windows. On Linux, it falls back to traditional containers. COI is built specifically for Linux using Incus system containers:
-- **No Docker Desktop needed** - COI uses Incus (fully open source), while Docker Sandboxes requires Docker Desktop (not open source, commercial licensing for organizations)
-- **System containers, not microVMs** - One clean isolation layer vs. containers-in-VMs complexity
-- **Linux-first design** - Built for Linux from day one, not as an afterthought
-
-See the [comparison section](#why-incus-instead-of-docker-or-docker-sandboxes) above for details.
-
-### How is COI different from DevContainers?
-
-**Purpose:** DevContainers are for setting up development environments. COI is for **securely running AI coding tools** that need broad system access.
-
-**Security model:**
-- **DevContainers** - Your code runs in the container, but typically with your host credentials mounted
-- **COI** - AI tools run in isolated containers **without** your credentials. Only your workspace is mounted, nothing else unless explicitly configured
-
-**Architecture:**
-- **DevContainers** - Application containers (Docker) without init systems
-- **COI** - System containers (Incus) with full systemd, can run Docker inside
-
-**Use case:** Use DevContainers for reproducible dev environments. Use COI when you want AI to modify code without risking credential exposure or host access.
-
-### How is COI different from Distrobox?
-
-**Purpose:** Distrobox provides lightweight Linux distributions for running GUI apps and development. COI is purpose-built for **isolated AI coding sessions**.
-
-**Security model:**
-- **Distrobox** - Designed for convenience, shares your home directory and host resources
-- **COI** - Designed for security, only mounts your workspace, credentials never exposed by default
-
-**Session management:**
-- **Distrobox** - Manual container lifecycle management
-- **COI** - Automatic session save/resume, ephemeral-by-default with workspace persistence
-
-**Features:**
-- **Distrobox** - Distribution compatibility, GUI apps, package manager access
-- **COI** - AI tool integration, session history, automatic cleanup, network isolation, snapshot/restore
-
-**Use case:** Use Distrobox for running apps from different Linux distros. Use COI when you want AI to safely modify your code.
-
-### Can I run COI on Windows?
-
-Not directly. Incus is Linux-only. However, you can:
-
-1. **WSL2 (Windows Subsystem for Linux)** - Install a Linux distribution in WSL2, then install Incus and COI inside WSL2
-2. **VM** - Run a Linux VM (Ubuntu, Debian, etc.) and install COI there
-
-Note: Windows support via WSL2 is experimental and not officially tested. Linux or macOS (via Colima/Lima) are the recommended platforms.
-
-### Does COI prevent prompt injection attacks?
-
-**No**, COI does not prevent prompt injection. What COI **does** protect against:
-
-✅ **Credential exposure** - Your SSH keys, environment variables, and API tokens are not accessible to AI tools
-✅ **Host system access** - AI tools can't access your entire filesystem, only the mounted workspace
-✅ **Lateral movement** - Network isolation prevents access to local network resources (in restricted mode)
-✅ **Persistent damage** - Ephemeral containers mean any malicious modifications are discarded
-
-What COI **doesn't** protect against:
-
-❌ **Prompt injection** - Malicious prompts can still trick the AI into generating harmful code
-❌ **API key leakage via AI** - If you give the AI your API key, it could be prompted to send it elsewhere
-❌ **Insecure code generation** - AI-generated code might have vulnerabilities (SQL injection, XSS, etc.)
-
-**Best practices:**
-- Review AI-generated code before committing
-- Don't mount sensitive credentials into containers
-- Use network isolation (restricted/allowlist modes) to limit data exfiltration
-- Commit AI changes with git hooks disabled (see [Security Best Practices](#security-best-practices))
-
-### What about API key security?
-
-**If the API key is for the AI tool itself** (e.g., Anthropic API key for Claude):
-- Store it in your host `~/.claude/settings.json` or similar config
-- COI can mount this file read-only if you enable `mount_claude_config = true` in config
-- The AI tool uses the key to authenticate, but it's not available to arbitrary commands in the container
-
-**If you're giving API keys to the AI for it to use** (e.g., AWS keys for the AI to deploy things):
-- **Don't do this unless you fully trust the project and AI's capabilities**
-- COI isolation prevents credential leakage to your host, but a compromised AI could still misuse those credentials
-- Use temporary/scoped credentials with minimal permissions
-- Prefer explicit mounting of credentials rather than storing them in the workspace
-
-### Is this really simpler than just running Claude Code directly?
-
-**First-time setup:** `coi build` (one time, 5-10 minutes), then `coi shell` - that's it!
-
-**After setup:** Just `cd your-project && coi shell` - same simplicity as running Claude Code directly, but with:
-- ✅ Automatic file ownership (no permission issues)
-- ✅ Credential isolation (your SSH keys safe)
-- ✅ Session save/resume (continue later)
-- ✅ Parallel sessions (multiple workspaces/slots)
-- ✅ Clean environment (no host pollution)
-
-The complexity is hidden. You get security and isolation with the same simple workflow.
-
-### What is Incus? (Is it the same as tmux?)
-
-**No, Incus is not tmux.** They're completely different tools:
-
-**Incus** - Linux container and VM manager (like Docker, but for system containers)
-- Manages containers with full operating systems inside
-- Provides isolation, networking, storage, etc.
-- COI uses Incus to create isolated environments
-
-**tmux** - Terminal multiplexer for managing shell sessions
-- Lets you detach/reattach terminal sessions
-- COI uses tmux *inside* containers to manage AI tool sessions
-
-**In COI:** Incus creates the container, tmux runs inside it to manage your session with the AI tool.
-
-### Why should I trust this?
-
-Fair question! Here's what makes COI trustworthy:
-
-**Open Source** - Full source code at github.com/mensfeld/code-on-incus (MIT license)
-- Review the code yourself
-- Community can audit and contribute
-- No hidden behavior
-
-**Transparent architecture:**
-- Uses standard Linux tools (Incus, tmux, systemd)
-- No custom daemons or proprietary components
-- Easy to inspect running containers (`incus list`, `incus exec`)
-
-**Security by design:**
-- Credentials isolated by default (not mounted unless you configure it)
-- Network isolation with firewalld (blocks private networks by default)
-- Workspace-only mounting (AI can't access your entire filesystem)
-
-**Active development** - Regular updates, responsive to issues, community-driven improvements
-
-### Do I need to give COI "full access"?
-
-**COI itself doesn't need "full access" to anything.** Here's what actually happens:
-
-**COI requires:**
-- Incus permissions (you must be in `incus-admin` group)
-- Access to your workspace directory (the project you're working on)
-- Optional: firewalld sudo for network isolation (you can use `--network=open` to avoid this)
-
-**What AI tools can access:**
-- ✅ **Your workspace only** - The project directory you explicitly mount
-- ✅ **Container filesystem** - Temporary files that get deleted (ephemeral mode)
-- ❌ **Your SSH keys** - Not accessible unless you explicitly mount `~/.ssh`
-- ❌ **Your home directory** - Not accessible
-- ❌ **Your environment variables** - Not passed to the container
-- ❌ **Your local network** - Blocked by default (restricted mode)
-
-You control what gets mounted. By default, COI is locked down.
-
-### Quick Comparison: COI vs. Other Tools
-
-| Tool | Purpose | Credentials Isolated | AI Tool Support | Session Management | Best For |
-|------|---------|---------------------|-----------------|-------------------|----------|
-| **COI** | AI coding isolation | ✅ Yes (default) | Built-in | Auto save/resume | Running AI coding tools securely |
-| **Docker Sandboxes** | AI tool isolation | ✅ Yes | Limited | Manual | macOS/Windows users (requires Docker Desktop) |
-| **DevContainers** | Dev environment | ❌ No (typically mounted) | Manual | Manual | Reproducible development environments |
-| **Distrobox** | Desktop apps/dev | ❌ No (shares home) | Manual | Manual | Running apps from different distros |
-| **Bare metal** | Direct execution | ❌ No (full access) | Manual | None | Maximum performance, trusted environments |
-
-**Choose COI if:** You want AI to modify code without credential exposure, automatic session management, and strong isolation.
+- **Resource Efficiency** - Share kernel like Docker, lower overhead than VMs, better density for parallel sessions.
 
 ## Installation
 
@@ -1450,3 +1284,149 @@ COI deliberately uses an in-container fix rather than modifying your Incus netwo
 5. **Principle of least surprise** - Modifying system-level Incus config without explicit consent could break other setups
 
 The in-container approach is self-contained and only affects COI images, leaving your Incus configuration untouched.
+## Frequently Asked Questions
+
+### How is COI different from Docker Sandboxes?
+
+Docker Sandboxes is a Docker Desktop feature that uses microVMs for isolation on macOS/Windows. On Linux, it falls back to traditional containers. COI is built specifically for Linux using Incus system containers:
+- **No Docker Desktop needed** - COI uses Incus (fully open source), while Docker Sandboxes requires Docker Desktop (not open source, commercial licensing for organizations)
+- **System containers, not microVMs** - One clean isolation layer vs. containers-in-VMs complexity
+- **Linux-first design** - Built for Linux from day one, not as an afterthought
+
+### How is COI different from DevContainers?
+
+**Purpose:** DevContainers are for setting up development environments. COI is for securely running AI coding tools that need broad system access.
+
+**Security model:**
+- **DevContainers** - Your code runs in the container, but typically with your host credentials mounted
+- **COI** - AI tools run in isolated containers **without** your credentials. Only your workspace is mounted, nothing else unless explicitly configured
+
+**Architecture:**
+- **DevContainers** - Application containers (Docker) without init systems
+- **COI** - System containers (Incus) with full systemd, can run Docker inside
+
+### Can I run COI on Windows?
+
+Not directly. Incus is Linux-only. However, you can:
+
+1. **WSL2 (Windows Subsystem for Linux)** - Install a Linux distribution in WSL2, then install Incus and COI inside WSL2
+2. **VM** - Run a Linux VM (Ubuntu, Debian, etc.) and install COI there
+
+Note: Windows support via WSL2 is experimental and not officially tested. Linux or macOS (via Colima/Lima) are the recommended platforms.
+
+### Does COI prevent prompt injection attacks?
+
+**No**, COI does not prevent prompt injection. What COI **does** protect against:
+
+- ✅ **Credential exposure** - Your SSH keys, environment variables, and API tokens are not accessible to AI tools
+- ✅ **Host system access** - AI tools can't access your entire filesystem, only the mounted workspace
+- ✅ **Lateral movement** - Network isolation prevents access to local network resources (in restricted mode)
+- ✅ **Remote code execution blast radius** - Built-in firewalld networking limits access to private networks and metadata services in restricted mode, and allowlist mode can constrain egress to approved domains/IPs, reducing (but not eliminating) data exfiltration and command-and-control risk
+- ✅ **Persistent damage** - Ephemeral containers mean any malicious modifications are discarded
+
+What COI **doesn't** protect against:
+
+- ❌ **Prompt injection** - Malicious prompts can still trick the AI into generating harmful code
+- ❌ **API key leakage via AI** - If you give the AI your API key, it could be prompted to send it elsewhere
+- ❌ **Insecure code generation** - AI-generated code might have vulnerabilities (SQL injection, XSS, etc.)
+
+**Best practices:**
+
+- Review AI-generated code before committing
+- Don't mount sensitive credentials into containers
+- Use network isolation (restricted/allowlist modes) to limit data exfiltration
+- Commit AI changes with git hooks disabled (see [Security Best Practices](#security-best-practices))
+
+### What about API key security?
+
+**If the API key is for the AI tool itself** (e.g., Anthropic API key for Claude):
+- Store it in your host `~/.claude/settings.json` or similar config
+- COI can mount this file read-only if you enable `mount_claude_config = true` in config
+- The AI tool uses the key to authenticate, but it's not available to arbitrary commands in the container
+
+**If you're giving API keys to the AI for it to use** (e.g., AWS keys for the AI to deploy things):
+- **Don't do this unless you fully trust the project and AI's capabilities**
+- COI isolation prevents credential leakage to your host, but a compromised AI could still misuse those credentials
+- Use temporary/scoped credentials with minimal permissions
+- Prefer explicit mounting of credentials rather than storing them in the workspace
+
+### Is this really simpler than just running Claude Code directly?
+
+**First-time setup:** `coi build` (one time, 5-10 minutes), then `coi shell` - that's it!
+
+**After setup:** Just `cd your-project && coi shell` - same simplicity as running Claude Code directly, but with:
+- ✅ Automatic file ownership (no permission issues)
+- ✅ Credential isolation (your SSH keys safe)
+- ✅ Session save/resume (continue later)
+- ✅ Parallel sessions (multiple workspaces/slots)
+- ✅ Clean environment (no host pollution)
+
+The complexity is hidden. You get security and isolation with the same simple workflow.
+
+### What is Incus? (Is it the same as tmux?)
+
+**No, Incus is not tmux.** They're completely different tools:
+
+**Incus** - Linux container and VM manager (like Docker, but for system containers)
+- Manages containers with full operating systems inside
+- Provides isolation, networking, storage, etc.
+- COI uses Incus to create isolated environments
+
+**tmux** - Terminal multiplexer for managing shell sessions
+- Lets you detach/reattach terminal sessions
+- COI uses tmux *inside* containers to manage AI tool sessions
+
+**In COI:** Incus creates the container, tmux runs inside it to manage your session with the AI tool.
+
+### Why should I trust this?
+
+Fair question! Here's what makes COI trustworthy:
+
+**Open Source** - Full source code at github.com/mensfeld/code-on-incus (MIT license)
+- Review the code yourself
+- Community can audit and contribute
+- No hidden behavior
+
+**Transparent architecture:**
+- Uses standard Linux tools (Incus, tmux, systemd)
+- No custom daemons or proprietary components
+- Easy to inspect running containers (`incus list`, `incus exec`)
+
+**Security by design:**
+- Credentials isolated by default (not mounted unless you configure it)
+- Network isolation with firewalld (blocks private networks by default)
+- Workspace-only mounting (AI can't access your entire filesystem)
+
+**Active development** - Regular updates, responsive to issues, community-driven improvements
+
+### Do I need to give COI "full access"?
+
+**COI itself doesn't need "full access" to anything.** Here's what actually happens:
+
+**COI requires:**
+- Incus permissions (you must be in `incus-admin` group)
+- Access to your workspace directory (the project you're working on)
+- Optional: firewalld sudo for network isolation (you can use `--network=open` to avoid this)
+
+**What AI tools can access:**
+- ✅ **Your workspace only** - The project directory you explicitly mount
+- ✅ **Container filesystem** - Temporary files that get deleted (ephemeral mode)
+- ❌ **Your SSH keys** - Not accessible unless you explicitly mount `~/.ssh`
+- ❌ **Your home directory** - Not accessible
+- ❌ **Your environment variables** - Not passed to the container
+- ❌ **Your local network** - Blocked by default (restricted mode)
+
+You control what gets mounted. By default, COI is locked down.
+
+### Quick Comparison: COI vs. Other Tools
+
+| Tool | Purpose | Credentials Isolated | AI Tool Support | Session Management | Best For |
+|------|---------|---------------------|-----------------|-------------------|----------|
+| **COI** | AI coding isolation | ✅ Yes (default) | Built-in | Auto save/resume | Running AI coding tools securely |
+| **Docker Sandboxes** | AI tool isolation | ✅ Yes | Limited | Manual | macOS/Windows users (requires Docker Desktop) |
+| **DevContainers** | Dev environment | ❌ No (typically mounted) | Manual | Manual | Reproducible development environments |
+| **Distrobox** | Desktop apps/dev | ❌ No (shares home) | Manual | Manual | Running apps from different distros |
+| **Bare metal** | Direct execution | ❌ No (full access) | Manual | None | Maximum performance, trusted environments |
+
+**Choose COI if:** You want AI to modify code without credential exposure, automatic session management, and strong isolation.
+
