@@ -20,6 +20,26 @@ Run AI coding assistants (Claude Code, Aider, and more) in isolated, production-
 
 ![Demo](misc/demo.gif)
 
+## Table of Contents
+
+- [Supported AI Coding Tools](#supported-ai-coding-tools)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Why Incus Instead of Docker or Docker Sandboxes?](#why-incus-instead-of-docker-or-docker-sandboxes)
+- [Installation](#installation)
+- [Running on macOS (Colima/Lima)](#running-on-macos-colimalima)
+- [Usage](#usage)
+- [Session Resume](#session-resume)
+- [Persistent Mode](#persistent-mode)
+- [Configuration](#configuration)
+- [Resource and Time Limits](#resource-and-time-limits)
+- [Container Lifecycle & Session Persistence](#container-lifecycle--session-persistence)
+- [Network Isolation](#network-isolation)
+- [Security Best Practices](#security-best-practices)
+- [System Health Check](#system-health-check)
+- [Troubleshooting](#troubleshooting)
+- [Frequently Asked Questions](#frequently-asked-questions)
+
 ## Supported AI Coding Tools
 
 Currently supported:
@@ -698,11 +718,11 @@ persistent = true
 
 **Coding Machines Concept:**
 
-Think of persistent containers as **dedicated coding machines owned by the AI agents**. The agent can freely install software, configure tools, modify the environment—it's their machine. Your workspace is mounted into their machine, they do the work, and you get the results back. This autonomy lets agents work efficiently without repeatedly setting up their environment, while your host system stays protected.
+Think of persistent containers as dedicated coding machines owned by the AI agents. The agent can freely install software, configure tools, modify the environment—it's their machine. Your workspace is mounted into their machine, they do the work, and you get the results back. This autonomy lets agents work efficiently without repeatedly setting up their environment, while your host system stays protected.
 
 **What persists:**
 - **Ephemeral mode:** Workspace files + session data (container deleted)
-- **Persistent mode:** Workspace files + session data + container state + installed packages
+- **Persistent mode:** Workspace files + session data + container state + installed packages, system setup
 
 ## Configuration
 
