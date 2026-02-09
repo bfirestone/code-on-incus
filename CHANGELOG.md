@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Documentation
+
+- [Documentation] **File transfer operations** - Documented existing `coi file push` and `coi file pull` commands in README. These commands have been available since early releases for transferring files and directories between host and containers, supporting recursive operations with the `-r` flag. Includes 16 integration tests covering various scenarios. See [File Transfer wiki page](https://github.com/mensfeld/code-on-incus/wiki/File-Transfer) for detailed usage examples.
+
 ### Bug Fixes
 
 - [Bug Fix] **Fix firewall rule cleanup on container delete** - The `coi container delete` command was missing firewall rule cleanup, causing rule accumulation when containers were deleted (especially during test cleanup). Now properly gets container IP before deletion and removes all firewall rules for that IP. This completes the firewall cleanup fixes ensuring all container deletion paths (`coi kill`, `coi container delete`, `session.Cleanup()`) properly clean up firewall rules. Fixes #119. (#120)

@@ -362,6 +362,12 @@ coi container exec mycontainer -- echo "hello"   # Non-interactive command
 # List all containers (low-level, for programmatic use)
 coi container list                               # Text format (default)
 coi container list --format=json                 # JSON format
+
+# Transfer files between host and containers
+coi file push ./config.json mycontainer:/workspace/config.json
+coi file push -r ./src mycontainer:/workspace/src
+coi file pull mycontainer:/workspace/output.log ./output.log
+coi file pull -r mycontainer:/root/.claude ./backup/
 ```
 
 ### Global Flags
