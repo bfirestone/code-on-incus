@@ -2,12 +2,15 @@ package container
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -267,7 +270,116 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 	os.RemoveAll(localPath)
 
 	// Rename (move) the pulled directory to the final location
-	return os.Rename(pulledDir, localPath)
+	// If rename fails with cross-device error, fall back to copy via a temp dir
+	if err := os.Rename(pulledDir, localPath); err != nil {
+		if isCrossDeviceError(err) {
+			// Create a temporary directory on the same filesystem as localPath
+			tempDestDir, err := os.MkdirTemp(filepath.Dir(localPath), "coi-pull-*")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(tempDestDir)
+
+			// Copy into a temp target, then atomically rename to the final location
+			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
+			if err := copyDirRecursive(pulledDir, tempTarget); err != nil {
+				return err
+			}
+			return os.Rename(tempTarget, localPath)
+		}
+		return err
+	}
+	return nil
+}
+
+// isCrossDeviceError checks if the error is a cross-device link error (EXDEV)
+func isCrossDeviceError(err error) bool {
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		if errno, ok := linkErr.Err.(syscall.Errno); ok {
+			return errno == syscall.EXDEV
+		}
+	}
+	return false
+}
+
+// copyDirRecursive copies a directory recursively from src to dst
+func copyDirRecursive(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		// Handle symlinks
+		if entry.Type()&os.ModeSymlink != 0 {
+			if err := copySymlink(srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if entry.IsDir() {
+			if err := copyDirRecursive(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// copySymlink copies a symbolic link from src to dst
+func copySymlink(src, dst string) error {
+	link, err := os.Readlink(src)
+	if err != nil {
+		return err
+	}
+	return os.Symlink(link, dst)
+}
+
+// copyFile copies a single file from src to dst
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return err
+	}
+
+	if _, err = io.Copy(dstFile, srcFile); err != nil {
+		// Best-effort close; prefer the copy error if both occur.
+		_ = dstFile.Close()
+		return err
+	}
+
+	// Propagate any error that occurs while flushing/closing the writable file.
+	return dstFile.Close()
 }
 
 // PushDirectory pushes a directory to the container recursively
