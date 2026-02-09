@@ -1286,3 +1286,111 @@ func CheckImageAge(imageName string) HealthCheck {
 		Message: fmt.Sprintf("Image '%s' not found", imageName),
 	}
 }
+
+// CheckOrphanedResources checks for orphaned system resources
+func CheckOrphanedResources() HealthCheck {
+	// Check for orphaned veths
+	orphanedVeths := 0
+	entries, err := os.ReadDir("/sys/class/net")
+	if err == nil {
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasPrefix(name, "veth") {
+				continue
+			}
+			masterPath := fmt.Sprintf("/sys/class/net/%s/master", name)
+			if _, err := os.Stat(masterPath); os.IsNotExist(err) {
+				orphanedVeths++
+			}
+		}
+	}
+
+	// Check for orphaned firewall rules
+	orphanedRules := 0
+	if network.FirewallAvailable() {
+		// Get running container IPs
+		containerIPs := make(map[string]bool)
+		output, err := container.IncusOutput("list", "--format=json")
+		if err == nil {
+			var containers []struct {
+				State struct {
+					Status  string `json:"status"`
+					Network map[string]struct {
+						Addresses []struct {
+							Family  string `json:"family"`
+							Address string `json:"address"`
+						} `json:"addresses"`
+					} `json:"network"`
+				} `json:"state"`
+			}
+			if json.Unmarshal([]byte(output), &containers) == nil {
+				for _, c := range containers {
+					if c.State.Status == "Running" {
+						if eth0, ok := c.State.Network["eth0"]; ok {
+							for _, addr := range eth0.Addresses {
+								if addr.Family == "inet" {
+									containerIPs[addr.Address] = true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Check firewall rules for orphaned IPs
+		cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
+		if ruleOutput, err := cmd.Output(); err == nil {
+			for _, line := range strings.Split(string(ruleOutput), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" || !strings.Contains(line, "FORWARD") || strings.Contains(line, "conntrack") {
+					continue
+				}
+				// Check if rule references a 10.x.x.x IP that's not a running container
+				isOrphaned := true
+				for ip := range containerIPs {
+					if strings.Contains(line, ip) {
+						isOrphaned = false
+						break
+					}
+				}
+				if isOrphaned && strings.Contains(line, "10.") {
+					orphanedRules++
+				}
+			}
+		}
+	}
+
+	totalOrphans := orphanedVeths + orphanedRules
+
+	if totalOrphans == 0 {
+		return HealthCheck{
+			Name:    "orphaned_resources",
+			Status:  StatusOK,
+			Message: "No orphaned resources",
+		}
+	}
+
+	message := fmt.Sprintf("%d orphaned resource(s) found", totalOrphans)
+	if orphanedVeths > 0 {
+		message += fmt.Sprintf(" (%d veths", orphanedVeths)
+		if orphanedRules > 0 {
+			message += fmt.Sprintf(", %d firewall rules)", orphanedRules)
+		} else {
+			message += ")"
+		}
+	} else if orphanedRules > 0 {
+		message += fmt.Sprintf(" (%d firewall rules)", orphanedRules)
+	}
+	message += " - run 'coi clean' to remove"
+
+	return HealthCheck{
+		Name:   "orphaned_resources",
+		Status: StatusWarning,
+		Message: message,
+		Details: map[string]interface{}{
+			"orphaned_veths":          orphanedVeths,
+			"orphaned_firewall_rules": orphanedRules,
+		},
+	}
+}

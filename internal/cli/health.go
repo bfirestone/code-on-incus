@@ -93,7 +93,7 @@ func outputHealthText(result *health.HealthResult) error {
 		"NETWORKING":    {"network_bridge", "ip_forwarding", "firewall"},
 		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space"},
 		"CONFIGURATION": {"config", "network_mode", "tool"},
-		"STATUS":        {"active_containers", "saved_sessions"},
+		"STATUS":        {"active_containers", "saved_sessions", "orphaned_resources"},
 		"OPTIONAL":      {"dns_resolution", "passwordless_sudo"},
 	}
 
@@ -220,6 +220,7 @@ func formatCheckName(name string) string {
 		"saved_sessions":     "Saved sessions",
 		"dns_resolution":     "DNS resolution",
 		"passwordless_sudo":  "Passwordless sudo",
+		"orphaned_resources": "Orphaned resources",
 	}
 
 	if displayName, ok := specialCases[name]; ok {
