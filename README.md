@@ -32,13 +32,13 @@ Run AI coding assistants (Claude Code, Aider, and more) in isolated, production-
 - [Session Resume](#session-resume)
 - [Persistent Mode](#persistent-mode)
 - [Configuration](#configuration)
-- [Resource and Time Limits](#resource-and-time-limits)
 - [Container Lifecycle & Session Persistence](#container-lifecycle--session-persistence)
 - [Network Isolation](#network-isolation)
-- [Security Best Practices](#security-best-practices)
 - [System Health Check](#system-health-check)
-- [Troubleshooting](#troubleshooting)
-- [Frequently Asked Questions](https://github.com/mensfeld/code-on-incus/wiki/FAQ)
+- [Resource and Time Limits](https://github.com/mensfeld/code-on-incus/wiki/Resource-and-Time-Limits)
+- [Security Best Practices](https://github.com/mensfeld/code-on-incus/wiki/Security-Best-Practices)
+- [Troubleshooting](https://github.com/mensfeld/code-on-incus/wiki/Troubleshooting)
+- [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ)
 
 ## Supported AI Coding Tools
 
@@ -765,140 +765,20 @@ persistent = true
 
 ## Resource and Time Limits
 
-Control container resource consumption and runtime with configurable limits. All limits can be set via config file or CLI flags.
+See the [Resource and Time Limits guide](https://github.com/mensfeld/code-on-incus/wiki/Resource-and-Time-Limits) for complete documentation on controlling container resource consumption and runtime.
 
-### Configuration
-
-Add to your `~/.config/coi/config.toml`:
-
-```toml
-[limits.cpu]
-count = "2"              # CPU cores: "2", "0-3", "0,1,3" or "" (unlimited)
-allowance = "50%"        # CPU time: "50%", "25ms/100ms" or "" (unlimited)
-priority = 0             # CPU priority: 0-10 (higher = more priority)
-
-[limits.memory]
-limit = "2GiB"           # Memory: "512MiB", "2GiB", "50%" or "" (unlimited)
-enforce = "soft"         # Enforcement: "hard" or "soft"
-swap = "true"            # Swap: "true", "false", or size like "1GiB"
-
-[limits.disk]
-read = "10MiB/s"         # Read rate: "10MiB/s", "1000iops" or "" (unlimited)
-write = "5MiB/s"         # Write rate: "5MiB/s", "1000iops" or "" (unlimited)
-max = ""                 # Combined I/O limit (overrides read/write)
-priority = 0             # Disk priority: 0-10
-
-[limits.runtime]
-max_duration = "2h"      # Max runtime: "2h", "30m", "1h30m" or "" (unlimited)
-max_processes = 0        # Max processes: 100 or 0 (unlimited)
-auto_stop = true         # Auto-stop when max_duration reached
-stop_graceful = true     # Graceful (true) vs force (false) stop
-```
-
-### CLI Flags
-
-Override config file settings with flags:
-
+**Quick example:**
 ```bash
-# CPU limits
-coi shell --limit-cpu="2" --limit-cpu-allowance="50%"
-
-# Memory limits
-coi shell --limit-memory="2GiB" --limit-memory-swap="1GiB"
-
-# Disk limits
-coi shell --limit-disk-read="10MiB/s" --limit-disk-write="5MiB/s"
-
-# Runtime limits
-coi shell --limit-duration="2h" --limit-processes=100
-
-# Combine multiple limits
-coi shell \
-  --limit-cpu="2" \
-  --limit-memory="2GiB" \
-  --limit-duration="1h"
+# Limit CPU, memory, and runtime
+coi shell --limit-cpu="2" --limit-memory="2GiB" --limit-duration="2h"
 ```
 
-### Profile-Specific Limits
-
-Define limits per profile:
-
-```toml
-[profiles.limited]
-image = "coi"
-persistent = false
-
-[profiles.limited.limits.cpu]
-count = "2"
-allowance = "50%"
-
-[profiles.limited.limits.memory]
-limit = "2GiB"
-
-[profiles.limited.limits.runtime]
-max_duration = "2h"
-auto_stop = true
-```
-
-Use with: `coi shell --profile limited`
-
-### Time Limits and Auto-Stop
-
-When `max_duration` is set and `auto_stop = true`:
-- Container automatically stops after the specified duration
-- Graceful stop preserves session data
-- Force stop (`stop_graceful = false`) terminates immediately
-- Useful for preventing runaway sessions or managing costs
-
-Example:
-```bash
-# Auto-stop after 2 hours
-coi shell --limit-duration="2h"
-
-# The container will gracefully stop after 2 hours, saving session data
-```
-
-### Precedence
-
-Limits are applied with this precedence (highest to lowest):
-1. CLI flags (e.g., `--limit-cpu="2"`)
-2. Profile limits (if `--profile` specified)
-3. Config `[limits]` section
-4. Unlimited (Incus defaults)
-
-### Examples
-
-**Limit resources for expensive operations:**
-```bash
-coi shell \
-  --limit-cpu="4" \
-  --limit-memory="4GiB" \
-  --limit-duration="30m"
-```
-
-**Prevent runaway processes:**
-```bash
-coi shell \
-  --limit-processes=100 \
-  --limit-duration="1h" \
-  --limit-memory="2GiB"
-```
-
-**Development profile with limits:**
-```toml
-[profiles.dev]
-image = "coi"
-persistent = true
-
-[profiles.dev.limits.cpu]
-count = "2"
-
-[profiles.dev.limits.memory]
-limit = "4GiB"
-
-[profiles.dev.limits.runtime]
-max_duration = "4h"
-```
+**What you can limit:**
+- CPU cores and usage percentage
+- Memory and swap
+- Disk I/O rates
+- Maximum runtime and process count
+- Auto-stop on time limits
 
 
 ## Container Lifecycle & Session Persistence
@@ -1153,53 +1033,18 @@ sudo chmod 440 /etc/sudoers.d/coi-firewalld
 
 ## Security Best Practices
 
-### Committing Changes from AI-Generated Code
+See the [Security Best Practices guide](https://github.com/mensfeld/code-on-incus/wiki/Security-Best-Practices) for detailed security recommendations.
 
-When working with AI tools in sandboxed containers, be aware that the container has write access to your `.git/` directory through the mounted workspace. This creates a potential attack surface where malicious code could modify git hooks or configuration files.
-
-**The Risk:**
-- AI tools can modify `.git/hooks/*` (pre-commit, post-commit, pre-push hooks)
-- These hooks execute arbitrary code when you run git commands
-- Modified `.gitattributes` can define filters that execute code during git operations
-- Git configuration (`.git/config`) could be altered to add malicious aliases
-
-**Best Practice: Disable Hooks When Committing AI-Generated Code**
-
-When committing code that was modified by AI tools, always bypass git hooks:
-
+**Key practice - Disable git hooks when committing AI-generated code:**
 ```bash
-# Recommended: Commit with hooks disabled
+# Commit with hooks disabled
 git -c core.hooksPath=/dev/null commit --no-verify -m "your message"
 
-# Or create an alias for convenience
+# Or create an alias
 alias gcs='git -c core.hooksPath=/dev/null commit --no-verify'
 ```
 
-**Why This Works:**
-- `core.hooksPath=/dev/null` tells git to look for hooks in a non-existent directory
-- `--no-verify` disables pre-commit, commit-msg, and applypatch-msg hooks
-- This prevents any malicious hooks from executing even if they were modified inside the container
-
-**Additional Protection:**
-
-```bash
-# Also disable git attributes filters (clean/smudge filters can execute code)
-git -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null commit --no-verify -m "msg"
-
-# Or make it a shell function for repeated use
-safe_commit() {
-    git -c core.hooksPath=/dev/null -c core.attributesFile=/dev/null commit --no-verify "$@"
-}
-```
-
-**When Is This Necessary?**
-
-This protection is most important when:
-- Committing code that was modified or generated by AI tools
-- You commit changes **outside** the container (recommended practice)
-- Your repository uses git hooks for automation (pre-commit, husky, etc.)
-
-**Note:** COI sandboxes already protect your host environment from malicious code execution. This guidance is specifically about preventing hooks from running when you commit AI-generated changes from your host shell.
+**Why:** Containers can write to `.git/` in your workspace. This prevents potentially modified hooks from executing when you commit from your host.
 
 ## System Health Check
 
@@ -1273,51 +1118,20 @@ All 16 checks passed
 
 ## Troubleshooting
 
-### DNS Issues During Build
+See the [Troubleshooting guide](https://github.com/mensfeld/code-on-incus/wiki/Troubleshooting) for common issues and solutions.
 
-**Symptom:** `coi build` hangs at "Still waiting for network..." even though the container has an IP address.
-
-**Cause:** On Ubuntu systems with systemd-resolved, containers may receive `127.0.0.53` as their DNS server via DHCP. This is the host's stub resolver which only works on the host, not inside containers.
-
-**Automatic Fix:** COI automatically detects and fixes this issue during build by:
-1. Detecting if DNS resolution fails but IP connectivity works
-2. Injecting public DNS servers (8.8.8.8, 8.8.4.4, 1.1.1.1) into the container
-3. The resulting image uses static DNS configuration
-
-**Permanent Fix:** Configure your Incus network to provide proper DNS to containers:
-
-```bash
-# Option 1: Enable managed DNS (recommended)
-incus network set incusbr0 dns.mode managed
-
-# Option 2: Use public DNS servers
-incus network set incusbr0 raw.dnsmasq "dhcp-option=6,8.8.8.8,8.8.4.4"
-```
-
-After applying either fix, future containers will have working DNS automatically.
-
-**Note:** The automatic fix only affects the built image. Other Incus containers on your system may still experience DNS issues until you apply the permanent fix.
-
-**Why doesn't COI automatically run `incus network set` for me?**
-
-COI deliberately uses an in-container fix rather than modifying your Incus network configuration:
-
-1. **System-level impact** - Changing Incus network settings affects all containers on that bridge, not just COI containers
-2. **Network name varies** - The bridge might not be named `incusbr0` on all systems
-3. **Permissions** - Users running `coi build` might not have permission to modify Incus network settings
-4. **Intentional configurations** - Some users have custom DNS configurations for their other containers
-5. **Principle of least surprise** - Modifying system-level Incus config without explicit consent could break other setups
-
-The in-container approach is self-contained and only affects COI images, leaving your Incus configuration untouched.
+**Common issues:**
+- **DNS issues during build** - COI automatically fixes systemd-resolved conflicts
+- Run `coi health` to diagnose setup problems
+- Check the troubleshooting guide for detailed solutions
 ## Frequently Asked Questions
 
-The FAQ has been moved to the [wiki](https://github.com/mensfeld/code-on-incus/wiki/FAQ) for easier maintenance and navigation.
+See the [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ) for answers to common questions.
 
-**Quick links:**
-- [How is COI different from Docker Sandboxes?](https://github.com/mensfeld/code-on-incus/wiki/FAQ#how-is-coi-different-from-docker-sandboxes)
-- [How is COI different from DevContainers?](https://github.com/mensfeld/code-on-incus/wiki/FAQ#how-is-coi-different-from-devcontainers)
-- [Can I run COI on Windows?](https://github.com/mensfeld/code-on-incus/wiki/FAQ#can-i-run-coi-on-windows)
-- [Does COI prevent prompt injection attacks?](https://github.com/mensfeld/code-on-incus/wiki/FAQ#does-coi-prevent-prompt-injection-attacks)
-- [What about API key security?](https://github.com/mensfeld/code-on-incus/wiki/FAQ#what-about-api-key-security)
-- [And more...](https://github.com/mensfeld/code-on-incus/wiki/FAQ)
+**Topics covered:**
+- How COI compares to Docker Sandboxes and DevContainers
+- Windows support (WSL2)
+- Security model and prompt injection protection
+- API key security and trust model
+- What is Incus? (vs tmux)
 
