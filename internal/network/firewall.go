@@ -217,6 +217,27 @@ func EnsureOpenModeRules(containerIP string) error {
 	return nil
 }
 
+// RemoveOpenModeRules removes the ACCEPT rules for a container in open mode
+func RemoveOpenModeRules(containerIP string) error {
+	if containerIP == "" {
+		return nil
+	}
+
+	// Remove the ACCEPT rule for traffic from this container
+	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--remove-rule",
+		"ipv4", "filter", "FORWARD", "0",
+		"-s", containerIP, "-j", "ACCEPT")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Rule might not exist, that's OK
+		if !strings.Contains(string(output), "NOT_ENABLED") {
+			return fmt.Errorf("failed to remove open mode rule: %s: %w", strings.TrimSpace(string(output)), err)
+		}
+	}
+
+	return nil
+}
+
 // addRule adds a firewall direct rule using firewall-cmd
 func (f *FirewallManager) addRule(priority int, source, destination, action string) error {
 	// firewall-cmd --direct --add-rule ipv4 filter FORWARD <priority> -s <src> -d <dst> -j <action>
@@ -275,7 +296,17 @@ func (f *FirewallManager) removeRule(rule string) error {
 // GetContainerIP retrieves the IPv4 address of a container from Incus
 // It retries for up to 30 seconds waiting for DHCP to assign an IP
 func GetContainerIP(containerName string) (string, error) {
-	const maxRetries = 30
+	return GetContainerIPWithRetries(containerName, 30)
+}
+
+// GetContainerIPFast retrieves the container IP with minimal retries
+// Use this when the container should already have an IP assigned
+func GetContainerIPFast(containerName string) (string, error) {
+	return GetContainerIPWithRetries(containerName, 3)
+}
+
+// GetContainerIPWithRetries retrieves the IPv4 address with configurable retry count
+func GetContainerIPWithRetries(containerName string, maxRetries int) (string, error) {
 	const retryDelay = time.Second
 
 	var lastErr error

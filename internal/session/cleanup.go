@@ -89,18 +89,19 @@ func Cleanup(opts CleanupOptions) error {
 				// Container stopped (user did 'sudo shutdown 0') - delete it
 				opts.Logger("Container was stopped, removing...")
 
-				// Delete container first (this detaches any ACLs from its devices)
+				// Clean up network FIRST while container still exists
+				// This ensures we can get the container IP to remove firewall rules
+				if opts.NetworkManager != nil {
+					if err := opts.NetworkManager.Teardown(context.Background(), opts.ContainerName); err != nil {
+						opts.Logger(fmt.Sprintf("Warning: Failed to cleanup network: %v", err))
+					}
+				}
+
+				// Now delete container
 				if err := mgr.Delete(true); err != nil {
 					opts.Logger(fmt.Sprintf("Warning: Failed to delete container: %v", err))
 				} else {
 					opts.Logger("Container removed (session data saved for --resume)")
-
-					// Clean up network ACL after successfully deleting container
-					// The ACL is now detached and can be safely deleted
-					if opts.NetworkManager != nil {
-						// Ignore errors - ACL might already be removed or not exist for this network mode
-						_ = opts.NetworkManager.Teardown(context.Background(), opts.ContainerName)
-					}
 				}
 			}
 		} else {

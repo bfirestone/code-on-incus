@@ -68,6 +68,10 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 				log.Printf("Warning: could not get container IP for open mode rules: %v", err)
 				return nil
 			}
+			// Cache the container IP for cleanup later
+			m.containerIP = containerIP
+			// Create firewall manager for cleanup
+			m.firewall = NewFirewallManager(containerIP, "")
 			if err := EnsureOpenModeRules(containerIP); err != nil {
 				log.Printf("Warning: could not add open mode rules: %v", err)
 			}
@@ -328,12 +332,31 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 	// Stop background refresher if running (for allowlist mode)
 	m.stopRefresher()
 
-	// Nothing to clean up in open mode
+	// For open mode, we also need to clean up firewall rules
+	// Open mode creates ACCEPT rules via EnsureOpenModeRules()
 	if m.config.Mode == config.NetworkModeOpen {
-		return nil
+		if !FirewallAvailable() {
+			return nil // No firewall, no rules to clean up
+		}
+
+		// Use cached container IP if available (set during SetupForContainer)
+		// Only try to get from container if not cached
+		if m.containerIP == "" {
+			containerIP, err := GetContainerIP(containerName)
+			if err != nil {
+				log.Printf("Warning: could not get container IP for cleanup: %v", err)
+				return nil // Container might be already deleted, and IP wasn't cached
+			}
+			m.containerIP = containerIP
+		}
+
+		// Create firewall manager if not already created
+		if m.firewall == nil {
+			m.firewall = NewFirewallManager(m.containerIP, "")
+		}
 	}
 
-	// Remove firewall rules
+	// Remove firewall rules for ALL modes
 	if m.firewall != nil {
 		if err := m.firewall.RemoveRules(); err != nil {
 			log.Printf("Warning: failed to remove firewall rules: %v", err)

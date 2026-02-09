@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/spf13/cobra"
 )
 
@@ -109,11 +110,26 @@ func killCommand(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		// Get container IP BEFORE stopping/deleting (needed for firewall cleanup)
+		// Use fast version since container should already have an IP assigned
+		var containerIP string
+		if network.FirewallAvailable() {
+			containerIP, _ = network.GetContainerIPFast(name)
+		}
+
 		// Stop container (only if running - skip if already stopped)
 		running, err := mgr.Running()
 		if err == nil && running {
 			if err := mgr.Stop(true); err != nil {
 				fmt.Fprintf(os.Stderr, "  Warning: Failed to stop %s: %v\n", name, err)
+			}
+		}
+
+		// Clean up firewall rules BEFORE deleting container
+		// This ensures we remove any rules that were created for this container
+		if containerIP != "" {
+			if err := cleanupFirewallRulesForIP(containerIP); err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup firewall rules: %v\n", err)
 			}
 		}
 
@@ -137,4 +153,15 @@ func killCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// cleanupFirewallRulesForIP removes any firewall rules associated with a container IP
+func cleanupFirewallRulesForIP(containerIP string) error {
+	if containerIP == "" {
+		return nil
+	}
+
+	// Create a temporary firewall manager to remove rules for this IP
+	fm := network.NewFirewallManager(containerIP, "")
+	return fm.RemoveRules()
 }
