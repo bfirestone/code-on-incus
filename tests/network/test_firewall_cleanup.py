@@ -370,17 +370,18 @@ def test_no_firewall_rule_accumulation(coi_binary, workspace_dir, cleanup_contai
     )
 
 
-def test_shutdown_cleanup_order(coi_binary, workspace_dir, cleanup_containers):
+def test_kill_cleans_up_restricted_rules(coi_binary, workspace_dir, cleanup_containers):
     """
-    Test that 'sudo shutdown 0' inside container triggers correct cleanup.
+    Test that 'coi kill' on a running container properly cleans up firewall rules.
 
-    When a user runs 'sudo shutdown 0' inside the container:
-    1. Container stops
-    2. coi detects stopped state in cleanup loop
-    3. Network teardown should happen FIRST (while container metadata still available)
-    4. Then container deletion
+    This verifies the fix where cleanup order was corrected:
+    1. Get container IP while container is still running
+    2. Clean up firewall rules
+    3. Then delete container
 
-    This specifically tests the fix in cleanup.go where the order was reversed.
+    Note: Testing cleanup after 'sudo shutdown 0' is not possible with --background
+    mode since there's no cleanup loop. The interactive session cleanup is tested
+    via the Go integration tests.
     """
     import pytest
 
@@ -416,41 +417,35 @@ def test_shutdown_cleanup_order(coi_binary, workspace_dir, cleanup_containers):
     # Wait for container
     time.sleep(5)
 
-    # Get container IP before shutdown
+    # Get container IP
     container_ip = get_container_ip(coi_binary, container_name)
 
     assert container_ip, "Should be able to get container IP"
 
     # Verify rules exist
-    rules_before_shutdown = count_rules_for_ip(container_ip)
-    assert rules_before_shutdown > 0, (
+    rules_before_kill = count_rules_for_ip(container_ip)
+    assert rules_before_kill > 0, (
         f"Restricted mode should have created rules for {container_ip}"
     )
 
-    # Trigger shutdown inside container (simulates user doing 'sudo shutdown 0')
-    # We use --user 0 to run as root
+    # Kill the running container - this should clean up firewall rules first
     subprocess.run(
-        [coi_binary, "container", "exec", container_name,
-         "--user", "0", "--group", "0", "--",
-         "shutdown", "-h", "now"],
+        [coi_binary, "kill", container_name],
         capture_output=True,
         timeout=30,
         check=False,
     )
 
-    # Wait for container to stop and cleanup to complete
-    # The coi cleanup loop polls every 500ms for 10 iterations (5 seconds)
-    # then deletes if stopped
-    time.sleep(10)
+    # Wait for cleanup
+    time.sleep(2)
 
     # Check if rules were cleaned up
-    rules_after_shutdown = count_rules_for_ip(container_ip)
+    rules_after_kill = count_rules_for_ip(container_ip)
 
-    if rules_after_shutdown > 0:
+    if rules_after_kill > 0:
         # Clean up for test hygiene
         cleanup_rules_for_ip(container_ip)
         assert False, (
-            f"Cleanup order bug: {rules_after_shutdown} rules still exist for {container_ip}. "
-            f"This indicates network teardown happened after container was deleted "
-            f"(and IP lookup failed)."
+            f"Cleanup order bug: {rules_after_kill} rules still exist for {container_ip}. "
+            f"This indicates firewall cleanup failed."
         )
