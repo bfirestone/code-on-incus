@@ -27,7 +27,6 @@ Run AI coding assistants (Claude Code, Aider, and more) in isolated, production-
 - [Quick Start](#quick-start)
 - [Why Incus Instead of Docker or Docker Sandboxes?](#why-incus-instead-of-docker-or-docker-sandboxes)
 - [Installation](#installation)
-- [Running on macOS (Colima/Lima)](#running-on-macos-colimalima)
 - [Usage](#usage)
 - [Session Resume](#session-resume)
 - [Persistent Mode](#persistent-mode)
@@ -294,142 +293,22 @@ coi build custom my-image --base coi --script setup.sh
 
 **Custom images:** Build your own specialized images using build scripts that run on top of the base `coi` image.
 
-## Running on macOS (Colima/Lima)
+## macOS Support
 
-COI can run on macOS by using Incus inside a [Colima](https://github.com/abiosoft/colima) or [Lima](https://github.com/lima-vm/lima) VM. These tools provide Linux VMs on macOS that can run Incus.
+**✅ COI works on macOS** using [Colima](https://github.com/abiosoft/colima) or [Lima](https://github.com/lima-vm/lima) VMs.
 
-**Automatic Environment Detection**: COI automatically detects when running inside a Colima or Lima VM and adjusts its configuration accordingly. No manual configuration needed!
+See the [macOS Setup Guide](https://github.com/mensfeld/code-on-incus/wiki/macOS-Setup-Guide) for complete instructions including:
+- Colima/Lima installation and setup
+- Automatic environment detection
+- Network configuration (`--network=open` required)
+- AWS Bedrock setup for macOS users
 
-### How It Works
-
-1. **Colima/Lima handle UID mapping** - These VMs mount macOS directories using virtiofs and map UIDs at the VM level
-2. **COI detects the environment** - Checks for virtiofs mounts in `/proc/mounts` and the `lima` user
-3. **UID shifting is auto-disabled** - COI automatically disables Incus's `shift=true` option to avoid conflicts with VM-level mapping
-
-### Network Mode on macOS
-
-**Important:** Network isolation modes (`restricted`, `allowlist`) require firewalld, which is not available in Colima/Lima VMs by default. Use `--network=open` for unrestricted network access:
-
+**Quick start:**
 ```bash
-# Inside Colima/Lima VM
-coi shell --network=open
-```
-
-Or set it as default in your config:
-
-```toml
-# ~/.config/coi/config.toml
-[network]
-mode = "open"
-```
-
-### AWS Bedrock on macOS/Colima
-
-If you're using Claude via AWS Bedrock, COI will automatically validate your setup when running in Colima/Lima and prevent startup with helpful error messages if anything is misconfigured.
-
-#### Common Issues and Fixes
-
-**Issue 1: Dual .aws Directory Locations**
-
-Colima creates two `.aws` locations that can get out of sync:
-- `/home/lima/.aws/` - Lima's VM home (where `~` expands inside Colima)
-- `/Users/<yourname>/.aws/` - macOS home (mounted via virtiofs)
-
-**Solution:** Pick one location and be consistent:
-1. **Recommended:** Use macOS path `/Users/<yourname>/.aws/`
-2. Run `aws sso login` on your Mac (not inside Colima)
-3. Ensure it's mounted to containers (see below)
-
-**Issue 2: Restrictive Permissions on SSO Cache**
-
-AWS SSO creates cache files with permissions `-rw-------` (600), which become unreadable inside containers.
-
-**Solution:** After running `aws sso login`, fix permissions:
-```bash
-chmod 644 ~/.aws/sso/cache/*.json
-```
-
-**Issue 3: .aws Not Mounted**
-
-The container needs access to your AWS credentials.
-
-**Solution:** Add to your config:
-```toml
-# ~/.config/coi/config.toml
-[[mounts.default]]
-host = "~/.aws"
-container = "/home/code/.aws"
-```
-
-#### Complete Bedrock Setup Example
-
-1. Configure Bedrock in `~/.claude/settings.json`:
-```json
-{
-  "anthropic": {
-    "apiProvider": "bedrock",
-    "bedrock": {
-      "region": "us-west-2",
-      "profile": "default"
-    }
-  }
-}
-```
-
-2. Set up AWS SSO (on macOS, not in Colima):
-```bash
-aws configure sso
-aws sso login
-chmod 644 ~/.aws/sso/cache/*.json
-```
-
-3. Configure mount in `~/.config/coi/config.toml`:
-```toml
-[[mounts.default]]
-host = "/Users/<yourname>/.aws"
-container = "/home/code/.aws"
-```
-
-4. Launch COI:
-```bash
-colima ssh
-coi shell --network=open
-```
-
-COI will validate your setup and provide clear error messages if anything is missing or misconfigured.
-
-### Setup
-
-```bash
-# Install Colima (example)
 brew install colima
-
-# Start Colima VM with sufficient resources
 colima start --cpu 4 --memory 8 --disk 50
-
-# SSH into the VM
 colima ssh
-
-# Inside the VM, install Incus
-sudo apt update && sudo apt install -y incus
-sudo incus admin init --auto
-sudo usermod -aG incus-admin $USER
-newgrp incus-admin
-
-# Install COI
-curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/install.sh | bash
-
-# Build image and start a session
-coi build
-coi shell --network=open
-```
-
-**Manual Override**: In rare cases where auto-detection doesn't work, you can manually configure:
-
-```toml
-# ~/.config/coi/config.toml
-[incus]
-disable_shift = true
+# Follow installation steps in the guide
 ```
 
 ## Usage
