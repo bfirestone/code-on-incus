@@ -158,23 +158,34 @@ def test_full_installation_process(meta_container, coi_binary):
     assert "go version" in result.stdout, "Go installation verification failed"
 
     # Phase 3: Clone repository and build coi
-    # In CI (pull requests), use the PR branch and repository (handles forks correctly)
+    # In CI (pull requests), try PR branch first, fall back to default branch
+    # This handles:
+    # - Fork PRs (branch doesn't exist in main repo)
+    # - Deleted branches (branch was deleted after PR merged)
     github_branch = os.environ.get("GITHUB_HEAD_REF", "")
-    github_repo_url = os.environ.get(
-        "GITHUB_REPOSITORY_URL", "https://github.com/mensfeld/code-on-incus.git"
-    )
+    github_repo = os.environ.get("GITHUB_REPOSITORY", "mensfeld/code-on-incus")
+    github_server = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+    repo_url = f"{github_server}/{github_repo}.git"
 
+    # Build clone command with fallback: try branch first, then default
     if github_branch:
-        clone_cmd = f"git clone -b {github_branch} {github_repo_url}"
+        clone_script = f"""
+        if git clone -b {github_branch} {repo_url} 2>/dev/null; then
+            echo "Cloned branch {github_branch}"
+        else
+            echo "Branch {github_branch} not found, cloning default branch"
+            git clone {repo_url}
+        fi
+        """
     else:
-        clone_cmd = f"git clone {github_repo_url}"
+        clone_script = f"git clone {repo_url}"
 
     result = exec_in_container(
         container_name,
         f"""
         set -e
         cd /root
-        {clone_cmd}
+        {clone_script}
         cd code-on-incus
         /usr/local/go/bin/go build -o coi ./cmd/coi
         ./coi version
