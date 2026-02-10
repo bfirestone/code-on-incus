@@ -198,41 +198,55 @@ func TestGitConfigDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
 
 	// Default should be to protect hooks
-	if !cfg.Git.ProtectHooks {
+	if cfg.Git.ProtectHooks == nil || !*cfg.Git.ProtectHooks {
 		t.Error("Expected default Git.ProtectHooks to be true")
 	}
 }
 
 func TestGitConfigMerge(t *testing.T) {
+	ptrBool := func(b bool) *bool { return &b }
+
 	tests := []struct {
 		name           string
-		baseProtect    bool
-		otherProtect   bool
-		expectedResult bool
+		baseProtect    *bool
+		otherProtect   *bool
+		expectedResult *bool
 	}{
 		{
 			name:           "true merged with true",
-			baseProtect:    true,
-			otherProtect:   true,
-			expectedResult: true,
+			baseProtect:    ptrBool(true),
+			otherProtect:   ptrBool(true),
+			expectedResult: ptrBool(true),
 		},
 		{
 			name:           "true merged with false",
-			baseProtect:    true,
-			otherProtect:   false,
-			expectedResult: false,
+			baseProtect:    ptrBool(true),
+			otherProtect:   ptrBool(false),
+			expectedResult: ptrBool(false),
 		},
 		{
 			name:           "false merged with true",
-			baseProtect:    false,
-			otherProtect:   true,
-			expectedResult: true,
+			baseProtect:    ptrBool(false),
+			otherProtect:   ptrBool(true),
+			expectedResult: ptrBool(true),
 		},
 		{
 			name:           "false merged with false",
-			baseProtect:    false,
-			otherProtect:   false,
-			expectedResult: false,
+			baseProtect:    ptrBool(false),
+			otherProtect:   ptrBool(false),
+			expectedResult: ptrBool(false),
+		},
+		{
+			name:           "true merged with nil (not set)",
+			baseProtect:    ptrBool(true),
+			otherProtect:   nil,
+			expectedResult: ptrBool(true),
+		},
+		{
+			name:           "false merged with nil (not set)",
+			baseProtect:    ptrBool(false),
+			otherProtect:   nil,
+			expectedResult: ptrBool(false),
 		},
 	}
 
@@ -249,8 +263,16 @@ func TestGitConfigMerge(t *testing.T) {
 
 			base.Merge(other)
 
-			if base.Git.ProtectHooks != tt.expectedResult {
-				t.Errorf("Expected Git.ProtectHooks to be %v, got %v", tt.expectedResult, base.Git.ProtectHooks)
+			if tt.expectedResult == nil {
+				if base.Git.ProtectHooks != nil {
+					t.Errorf("Expected Git.ProtectHooks to be nil, got %v", *base.Git.ProtectHooks)
+				}
+			} else {
+				if base.Git.ProtectHooks == nil {
+					t.Errorf("Expected Git.ProtectHooks to be %v, got nil", *tt.expectedResult)
+				} else if *base.Git.ProtectHooks != *tt.expectedResult {
+					t.Errorf("Expected Git.ProtectHooks to be %v, got %v", *tt.expectedResult, *base.Git.ProtectHooks)
+				}
 			}
 		})
 	}

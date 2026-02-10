@@ -20,7 +20,7 @@ type Config struct {
 
 // GitConfig contains git-related security settings
 type GitConfig struct {
-	ProtectHooks bool `toml:"protect_hooks"` // Mount .git/hooks read-only (default: true)
+	ProtectHooks *bool `toml:"protect_hooks"` // Mount .git/hooks read-only (default: true)
 }
 
 // DefaultsConfig contains default settings
@@ -191,7 +191,7 @@ func GetDefaultConfig() *Config {
 			Default: []MountEntry{},
 		},
 		Git: GitConfig{
-			ProtectHooks: true,
+			ProtectHooks: ptrBool(true),
 		},
 		Limits: LimitsConfig{
 			CPU: CPULimits{
@@ -245,6 +245,11 @@ func GetConfigPaths() []string {
 	}
 
 	return paths
+}
+
+// ptrBool returns a pointer to a bool value
+func ptrBool(b bool) *bool {
+	return &b
 }
 
 // ExpandPath expands ~ in paths to home directory
@@ -350,8 +355,10 @@ func (c *Config) Merge(other *Config) {
 	mergeLimits(&c.Limits, &other.Limits)
 
 	// Merge git settings
-	// For booleans, we take the other value (TOML parsing sets unspecified to false)
-	c.Git.ProtectHooks = other.Git.ProtectHooks
+	// Only override if explicitly set in the other config (nil means not set)
+	if other.Git.ProtectHooks != nil {
+		c.Git.ProtectHooks = other.Git.ProtectHooks
+	}
 
 	// Merge profiles
 	for name, profile := range other.Profiles {

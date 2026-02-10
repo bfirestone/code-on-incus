@@ -207,6 +207,20 @@ func runCommand(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
+
+		// Protect git hooks by mounting read-only (security feature)
+		protectGitHooks := (cfg.Git.ProtectHooks != nil && *cfg.Git.ProtectHooks) && !writableGitHooks
+		if protectGitHooks {
+			if err := session.SetupGitHooksMount(mgr, absWorkspace, useShift); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to protect git hooks: %v\n", err)
+			} else {
+				// Only log if .git exists
+				gitDir := filepath.Join(absWorkspace, ".git")
+				if _, err := os.Stat(gitDir); err == nil {
+					fmt.Fprintf(os.Stderr, "Protected .git/hooks (mounted read-only)\n")
+				}
+			}
+		}
 	} else {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 	}
