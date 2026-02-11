@@ -209,7 +209,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		// Protect git hooks by mounting read-only (security feature)
-		protectGitHooks := !((cfg.Git.WritableHooks != nil && *cfg.Git.WritableHooks) || writableGitHooks)
+		protectGitHooks := (cfg.Git.WritableHooks == nil || !*cfg.Git.WritableHooks) && !writableGitHooks
 		if protectGitHooks {
 			if err := session.SetupGitHooksMount(mgr, absWorkspace, useShift); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to protect git hooks: %v\n", err)

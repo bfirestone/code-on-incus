@@ -199,7 +199,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		DisableShift:    cfg.Incus.DisableShift,
 		LimitsConfig:    limitsConfig,
 		IncusProject:    cfg.Incus.Project,
-		ProtectGitHooks: !((cfg.Git.WritableHooks != nil && *cfg.Git.WritableHooks) || writableGitHooks),
+		ProtectGitHooks: (cfg.Git.WritableHooks == nil || !*cfg.Git.WritableHooks) && !writableGitHooks,
 	}
 
 	// Parse and validate mount configuration
