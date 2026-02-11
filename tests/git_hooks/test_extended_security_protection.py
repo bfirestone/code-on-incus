@@ -20,9 +20,7 @@ from pathlib import Path
 class TestGitConfigProtection:
     """Tests for .git/config protection (prevents core.hooksPath bypass)."""
 
-    def test_git_config_readonly_by_default(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_git_config_readonly_by_default(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that .git/config is mounted read-only by default."""
         # Initialize a git repository
         subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
@@ -122,9 +120,7 @@ class TestGitConfigProtection:
 class TestHuskyProtection:
     """Tests for .husky directory protection (husky git hooks manager)."""
 
-    def test_husky_readonly_by_default(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_husky_readonly_by_default(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that .husky directory is mounted read-only by default."""
         # Create .husky directory (simulating a project using husky)
         husky_dir = Path(workspace_dir) / ".husky"
@@ -217,9 +213,7 @@ class TestHuskyProtection:
         assert result.returncode == 0
         assert "Husky pre-commit" in result.stdout
 
-    def test_husky_nonexistent_no_error(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_husky_nonexistent_no_error(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that missing .husky directory doesn't cause errors."""
         # workspace_dir has no .husky directory
 
@@ -246,9 +240,7 @@ class TestHuskyProtection:
 class TestVscodeProtection:
     """Tests for .vscode directory protection (prevents tasks.json auto-execute attacks)."""
 
-    def test_vscode_readonly_by_default(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_vscode_readonly_by_default(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that .vscode directory is mounted read-only by default."""
         vscode_dir = Path(workspace_dir) / ".vscode"
         vscode_dir.mkdir(parents=True, exist_ok=True)
@@ -282,9 +274,7 @@ class TestVscodeProtection:
             or "permission denied" in combined.lower()
         ), f"Expected read-only error, got: {combined}"
 
-    def test_vscode_settings_json_protected(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_vscode_settings_json_protected(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that .vscode/settings.json cannot be modified."""
         vscode_dir = Path(workspace_dir) / ".vscode"
         vscode_dir.mkdir(parents=True, exist_ok=True)
@@ -342,9 +332,7 @@ class TestVscodeProtection:
 class TestSecurityConfigAdditionalPaths:
     """Tests for additional_protected_paths configuration."""
 
-    def test_additional_paths_are_protected(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_additional_paths_are_protected(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that additional_protected_paths adds to defaults."""
         # Create config that adds .idea to protected paths
         config_content = """
@@ -426,9 +414,7 @@ additional_protected_paths = [".idea"]
 class TestSecurityConfigCustomPaths:
     """Tests for protected_paths configuration (replaces defaults)."""
 
-    def test_custom_paths_replace_defaults(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_custom_paths_replace_defaults(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that protected_paths replaces the default list."""
         # Create config with only .git/hooks (not other defaults)
         config_content = """
@@ -471,9 +457,7 @@ protected_paths = [".git/hooks"]
 class TestSecurityConfigDisableProtection:
     """Tests for disable_protection configuration."""
 
-    def test_disable_protection_allows_all(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_disable_protection_allows_all(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that disable_protection=true allows writing to all paths."""
         # Create config that disables protection
         config_content = """
@@ -557,9 +541,7 @@ class TestSecurityLogging:
 class TestSymlinkSecurity:
     """Tests for symlink security (preventing mount of arbitrary host paths)."""
 
-    def test_symlinked_protected_path_rejected(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_symlinked_protected_path_rejected(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that symlinked protected paths are rejected."""
         # Create a target directory
         target_dir = Path(workspace_dir) / "target"
@@ -588,9 +570,7 @@ class TestSymlinkSecurity:
         # Should succeed (symlink just skipped, not an error)
         assert result.returncode == 0
 
-    def test_symlinked_git_dir_handled(
-        self, coi_binary, workspace_dir, cleanup_containers
-    ):
+    def test_symlinked_git_dir_handled(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that .git as symlink (worktree) is handled gracefully."""
         # Create a target directory
         target_dir = Path(workspace_dir) / "git-target"
