@@ -192,14 +192,14 @@ def test_git_hooks_writable_with_flag(coi_binary, workspace_dir, cleanup_contain
 
 
 def test_git_hooks_writable_via_config(coi_binary, workspace_dir, cleanup_containers):
-    """Test that protect_hooks=false in config allows writing to .git/hooks."""
+    """Test that writable_hooks=true in config allows writing to .git/hooks."""
     # Initialize git repo
     subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
 
-    # Create config that disables protection
+    # Create config that enables writable hooks (disables protection)
     config_content = """
 [git]
-protect_hooks = false
+writable_hooks = true
 """
     config_file = Path(workspace_dir) / ".coi.toml"
     config_file.write_text(config_content)

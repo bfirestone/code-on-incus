@@ -600,11 +600,11 @@ coi shell --writable-git-hooks # Opt-out if AI needs to manage hooks
 
 **Why this matters:** Git hooks (pre-commit, post-commit, etc.) execute automatically during git operations. If a container could modify these hooks, malicious code could be injected that runs on your host when you later commit. COI blocks this attack vector by default.
 
-**Disable via config:**
+**Enable writable hooks via config:**
 ```toml
 # ~/.config/coi/config.toml
 [git]
-protect_hooks = false
+writable_hooks = true
 ```
 
 **Additional protection - Disable git hooks when committing AI-generated code:**

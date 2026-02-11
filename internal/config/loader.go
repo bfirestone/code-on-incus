@@ -212,10 +212,11 @@ auto_stop = true
 stop_graceful = true
 
 [git]
-# Mount .git/hooks as read-only to prevent container from modifying git hooks
-# This protects against malicious hooks that could execute on the host
-# Set to false if you need the container to manage git hooks
-protect_hooks = true
+# Allow container to write to .git/hooks (default: false)
+# By default, .git/hooks is mounted read-only to prevent containers from
+# modifying git hooks that could execute malicious code on the host
+# Set to true if you need the container to manage git hooks (same as --writable-git-hooks flag)
+writable_hooks = false
 
 # Example profile for Rust development with persistent container
 # [profiles.rust]

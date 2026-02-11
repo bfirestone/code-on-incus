@@ -20,7 +20,7 @@ type Config struct {
 
 // GitConfig contains git-related security settings
 type GitConfig struct {
-	ProtectHooks *bool `toml:"protect_hooks"` // Mount .git/hooks read-only (default: true)
+	WritableHooks *bool `toml:"writable_hooks"` // Allow container to write to .git/hooks (default: false)
 }
 
 // DefaultsConfig contains default settings
@@ -191,7 +191,7 @@ func GetDefaultConfig() *Config {
 			Default: []MountEntry{},
 		},
 		Git: GitConfig{
-			ProtectHooks: ptrBool(true),
+			WritableHooks: ptrBool(false),
 		},
 		Limits: LimitsConfig{
 			CPU: CPULimits{
@@ -356,8 +356,8 @@ func (c *Config) Merge(other *Config) {
 
 	// Merge git settings
 	// Only override if explicitly set in the other config (nil means not set)
-	if other.Git.ProtectHooks != nil {
-		c.Git.ProtectHooks = other.Git.ProtectHooks
+	if other.Git.WritableHooks != nil {
+		c.Git.WritableHooks = other.Git.WritableHooks
 	}
 
 	// Merge profiles
