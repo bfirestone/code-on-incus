@@ -177,7 +177,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	useShift := !cfg.Incus.DisableShift
 	if !wasRestarted {
 		fmt.Fprintf(os.Stderr, "Mounting workspace %s...\n", absWorkspace)
-		if err := mgr.MountDisk("workspace", absWorkspace, "/workspace", useShift); err != nil {
+		if err := mgr.MountDisk("workspace", absWorkspace, "/workspace", useShift, false); err != nil {
 			return fmt.Errorf("failed to mount workspace: %w", err)
 		}
 
@@ -202,8 +202,22 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 				fmt.Fprintf(os.Stderr, "Adding mount: %s -> %s\n", mount.HostPath, mount.ContainerPath)
 
-				if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift); err != nil {
+				if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift, false); err != nil {
 					return fmt.Errorf("failed to add mount '%s': %w", mount.DeviceName, err)
+				}
+			}
+		}
+
+		// Protect git hooks by mounting read-only (security feature)
+		protectGitHooks := (cfg.Git.WritableHooks == nil || !*cfg.Git.WritableHooks) && !writableGitHooks
+		if protectGitHooks {
+			if err := session.SetupGitHooksMount(mgr, absWorkspace, useShift); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to protect git hooks: %v\n", err)
+			} else {
+				// Only log if .git exists
+				gitDir := filepath.Join(absWorkspace, ".git")
+				if _, err := os.Stat(gitDir); err == nil {
+					fmt.Fprintf(os.Stderr, "Protected .git/hooks (mounted read-only)\n")
 				}
 			}
 		}

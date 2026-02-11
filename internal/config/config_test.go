@@ -194,6 +194,90 @@ func TestGetConfigPaths(t *testing.T) {
 	}
 }
 
+func TestGitConfigDefaults(t *testing.T) {
+	cfg := GetDefaultConfig()
+
+	// Default should be to NOT allow writable hooks (protection enabled)
+	if cfg.Git.WritableHooks == nil || *cfg.Git.WritableHooks {
+		t.Error("Expected default Git.WritableHooks to be false")
+	}
+}
+
+func TestGitConfigMerge(t *testing.T) {
+	ptrBool := func(b bool) *bool { return &b }
+
+	tests := []struct {
+		name           string
+		baseWritable   *bool
+		otherWritable  *bool
+		expectedResult *bool
+	}{
+		{
+			name:           "true merged with true",
+			baseWritable:   ptrBool(true),
+			otherWritable:  ptrBool(true),
+			expectedResult: ptrBool(true),
+		},
+		{
+			name:           "true merged with false",
+			baseWritable:   ptrBool(true),
+			otherWritable:  ptrBool(false),
+			expectedResult: ptrBool(false),
+		},
+		{
+			name:           "false merged with true",
+			baseWritable:   ptrBool(false),
+			otherWritable:  ptrBool(true),
+			expectedResult: ptrBool(true),
+		},
+		{
+			name:           "false merged with false",
+			baseWritable:   ptrBool(false),
+			otherWritable:  ptrBool(false),
+			expectedResult: ptrBool(false),
+		},
+		{
+			name:           "true merged with nil (not set)",
+			baseWritable:   ptrBool(true),
+			otherWritable:  nil,
+			expectedResult: ptrBool(true),
+		},
+		{
+			name:           "false merged with nil (not set)",
+			baseWritable:   ptrBool(false),
+			otherWritable:  nil,
+			expectedResult: ptrBool(false),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := GetDefaultConfig()
+			base.Git.WritableHooks = tt.baseWritable
+
+			other := &Config{
+				Git: GitConfig{
+					WritableHooks: tt.otherWritable,
+				},
+			}
+
+			base.Merge(other)
+
+			if tt.expectedResult == nil {
+				if base.Git.WritableHooks != nil {
+					t.Errorf("Expected Git.WritableHooks to be nil, got %v", *base.Git.WritableHooks)
+				}
+			} else {
+				if base.Git.WritableHooks == nil {
+					t.Errorf("Expected Git.WritableHooks to be %v, got nil", *tt.expectedResult)
+				} else if *base.Git.WritableHooks != *tt.expectedResult {
+					t.Errorf("Expected Git.WritableHooks to be %v, got %v", *tt.expectedResult, *base.Git.WritableHooks)
+				}
+			}
+		})
+	}
+}
+
 func TestToolConfigDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
 

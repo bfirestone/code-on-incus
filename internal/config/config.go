@@ -14,7 +14,13 @@ type Config struct {
 	Tool     ToolConfig               `toml:"tool"`
 	Mounts   MountsConfig             `toml:"mounts"`
 	Limits   LimitsConfig             `toml:"limits"`
+	Git      GitConfig                `toml:"git"`
 	Profiles map[string]ProfileConfig `toml:"profiles"`
+}
+
+// GitConfig contains git-related security settings
+type GitConfig struct {
+	WritableHooks *bool `toml:"writable_hooks"` // Allow container to write to .git/hooks (default: false)
 }
 
 // DefaultsConfig contains default settings
@@ -184,6 +190,9 @@ func GetDefaultConfig() *Config {
 		Mounts: MountsConfig{
 			Default: []MountEntry{},
 		},
+		Git: GitConfig{
+			WritableHooks: ptrBool(false),
+		},
 		Limits: LimitsConfig{
 			CPU: CPULimits{
 				Count:     "",
@@ -236,6 +245,11 @@ func GetConfigPaths() []string {
 	}
 
 	return paths
+}
+
+// ptrBool returns a pointer to a bool value
+func ptrBool(b bool) *bool {
+	return &b
 }
 
 // ExpandPath expands ~ in paths to home directory
@@ -339,6 +353,12 @@ func (c *Config) Merge(other *Config) {
 
 	// Merge limits
 	mergeLimits(&c.Limits, &other.Limits)
+
+	// Merge git settings
+	// Only override if explicitly set in the other config (nil means not set)
+	if other.Git.WritableHooks != nil {
+		c.Git.WritableHooks = other.Git.WritableHooks
+	}
 
 	// Merge profiles
 	for name, profile := range other.Profiles {

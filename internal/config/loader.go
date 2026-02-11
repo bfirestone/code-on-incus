@@ -211,6 +211,13 @@ auto_stop = true
 # Graceful stop (true) or force stop (false)
 stop_graceful = true
 
+[git]
+# Allow container to write to .git/hooks (default: false)
+# By default, .git/hooks is mounted read-only to prevent containers from
+# modifying git hooks that could execute malicious code on the host
+# Set to true if you need the container to manage git hooks (same as --writable-git-hooks flag)
+writable_hooks = false
+
 # Example profile for Rust development with persistent container
 # [profiles.rust]
 # image = "coi-rust"
