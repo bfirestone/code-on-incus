@@ -54,3 +54,6 @@ test-config.toml
 # Backup files
 *.bck.yml
 *.backup
+
+# Git worktrees
+.worktrees/
