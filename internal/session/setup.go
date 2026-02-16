@@ -380,6 +380,22 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		return nil, err
 	}
 
+	// 6b. Validate that configured user exists in the container image
+	if !result.RunAsRoot {
+		codeUser := opts.CodeUser
+		if codeUser == "" {
+			codeUser = container.CodeUser
+		}
+		checkCmd := fmt.Sprintf("id %s 2>/dev/null", codeUser)
+		if _, err := result.Manager.ExecCommand(checkCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			return nil, fmt.Errorf(
+				"user '%s' does not exist in image '%s' — build a custom image with this user:\n"+
+					"  coi build custom coi-desktop --base images:archlinux --script scripts/build/desktop-arch.sh",
+				codeUser, image,
+			)
+		}
+	}
+
 	// 7. Start timeout monitor if max_duration is configured
 	if opts.LimitsConfig != nil && opts.LimitsConfig.Runtime.MaxDuration != "" {
 		duration, err := limits.ParseDuration(opts.LimitsConfig.Runtime.MaxDuration)
