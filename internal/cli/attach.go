@@ -125,14 +125,28 @@ func attachToContainer(containerName string) error {
 	// Direct command execution without bash -c wrapper for better terminal handling
 	mgr := container.NewManager(containerName)
 
+	// Resolve code_uid and workspace_container_path from config
+	codeUID := cfg.Incus.CodeUID
+	if codeUID == 0 {
+		codeUID = container.CodeUID
+	}
+	workspaceContainerPath := cfg.Incus.WorkspaceContainerPath
+	if workspaceContainerPath == "mirror" {
+		absWorkspace, _ := filepath.Abs(attachWorkspace)
+		workspaceContainerPath = absWorkspace
+	}
+	if workspaceContainerPath == "" {
+		workspaceContainerPath = "/workspace"
+	}
+
 	// Get TERM with fallback (same as shell command)
 	termEnv := terminal.SanitizeTerm(os.Getenv("TERM"))
 
 	// Execute as code user with proper environment setup
-	user := container.CodeUID
+	user := codeUID
 	opts := container.ExecCommandOptions{
 		User:        &user,
-		Cwd:         "/workspace",
+		Cwd:         workspaceContainerPath,
 		Interactive: true,
 		Env: map[string]string{
 			"TERM": termEnv,
@@ -166,11 +180,25 @@ func attachToContainerWithBash(containerName string) error {
 	// Use container manager for proper user/environment handling
 	mgr := container.NewManager(containerName)
 
+	// Resolve code_uid and workspace_container_path from config
+	codeUID := cfg.Incus.CodeUID
+	if codeUID == 0 {
+		codeUID = container.CodeUID
+	}
+	workspaceContainerPath := cfg.Incus.WorkspaceContainerPath
+	if workspaceContainerPath == "mirror" {
+		absWorkspace, _ := filepath.Abs(attachWorkspace)
+		workspaceContainerPath = absWorkspace
+	}
+	if workspaceContainerPath == "" {
+		workspaceContainerPath = "/workspace"
+	}
+
 	// Execute bash as code user
-	user := container.CodeUID
+	user := codeUID
 	opts := container.ExecCommandOptions{
 		User:        &user,
-		Cwd:         "/workspace",
+		Cwd:         workspaceContainerPath,
 		Interactive: true,
 	}
 
