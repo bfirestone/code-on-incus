@@ -60,9 +60,10 @@ func DefaultProtectedPaths() []string {
 
 // DefaultsConfig contains default settings
 type DefaultsConfig struct {
-	Image      string `toml:"image"`
-	Persistent bool   `toml:"persistent"`
-	Model      string `toml:"model"`
+	Image           string `toml:"image"`
+	Persistent      bool   `toml:"persistent"`
+	Model           string `toml:"model"`
+	MountToolConfig bool   `toml:"mount_tool_config"`
 }
 
 // PathsConfig contains path settings
@@ -74,11 +75,12 @@ type PathsConfig struct {
 
 // IncusConfig contains Incus-specific settings
 type IncusConfig struct {
-	Project      string `toml:"project"`
-	Group        string `toml:"group"`
-	CodeUID      int    `toml:"code_uid"`
-	CodeUser     string `toml:"code_user"`
-	DisableShift bool   `toml:"disable_shift"` // Disable UID shifting (for Colima/Lima environments)
+	Project                string `toml:"project"`
+	Group                  string `toml:"group"`
+	CodeUID                int    `toml:"code_uid"`
+	CodeUser               string `toml:"code_user"`
+	DisableShift           bool   `toml:"disable_shift"`            // Disable UID shifting (for Colima/Lima environments)
+	WorkspaceContainerPath string `toml:"workspace_container_path"` // Mount point for workspace in container (default: "/workspace", "mirror" = use host path)
 }
 
 // NetworkMode represents the network isolation mode
@@ -193,10 +195,11 @@ func GetDefaultConfig() *Config {
 			LogsDir:     filepath.Join(baseDir, "logs"),
 		},
 		Incus: IncusConfig{
-			Project:  "default",
-			Group:    "incus-admin",
-			CodeUID:  1000,
-			CodeUser: "code",
+			Project:                "default",
+			Group:                  "incus-admin",
+			CodeUID:                1000,
+			CodeUser:               "code",
+			WorkspaceContainerPath: "/workspace",
 		},
 		Network: NetworkConfig{
 			Mode:                  NetworkModeRestricted,
@@ -323,6 +326,7 @@ func (c *Config) Merge(other *Config) {
 	// In TOML, if a field is not present, it will be false (zero value)
 	// This is a limitation - we'll just override if file exists
 	c.Defaults.Persistent = other.Defaults.Persistent
+	c.Defaults.MountToolConfig = other.Defaults.MountToolConfig
 
 	// Merge paths
 	if other.Paths.SessionsDir != "" {
@@ -384,6 +388,9 @@ func (c *Config) Merge(other *Config) {
 	// For DisableShift, if the other config sets it to true, use it
 	if other.Incus.DisableShift {
 		c.Incus.DisableShift = true
+	}
+	if other.Incus.WorkspaceContainerPath != "" {
+		c.Incus.WorkspaceContainerPath = other.Incus.WorkspaceContainerPath
 	}
 
 	// Merge mounts - append from other config
