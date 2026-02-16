@@ -30,6 +30,7 @@ Run AI coding assistants (Claude Code, Aider, and more) in isolated, production-
 - [Usage](#usage)
 - [Session Resume](#session-resume)
 - [Persistent Mode](#persistent-mode)
+- [Desktop Mirror Mode](#desktop-mirror-mode)
 - [Configuration](#configuration)
 - [System Health Check](https://github.com/mensfeld/code-on-incus/wiki/System-Health-Check)
 - [Container Lifecycle & Session Persistence](https://github.com/mensfeld/code-on-incus/wiki/Container-Lifecycle-and-Sessions)
@@ -484,15 +485,69 @@ Think of persistent containers as dedicated coding machines owned by the AI agen
 - **Ephemeral mode:** Workspace files + session data (container deleted)
 - **Persistent mode:** Workspace files + session data + container state + installed packages, system setup
 
+## Desktop Mirror Mode
+
+Desktop mirror mode makes the container mirror your host desktop environment — same username, same UID, same workspace paths, and your tool config mounted directly from the host. This is ideal for developers who want the container to feel like an extension of their local machine.
+
+**Step 1: Build a custom desktop image**
+
+Create a build script that sets up your user in the container (see `scripts/build/desktop-arch.sh` for an example), then build:
+
+```bash
+coi build custom coi-desktop --base images:archlinux --script scripts/build/desktop-arch.sh
+```
+
+The image should create a user matching your host username and UID (e.g., `bfirestone` with UID 1000) and install any tools you need.
+
+**Step 2: Configure mirror mode**
+
+```toml
+# ~/.config/coi/config.toml
+[defaults]
+image = "coi-desktop"
+persistent = true
+mount_tool_config = true    # Mount ~/.claude directly instead of copying
+
+[incus]
+code_user = "bfirestone"    # Must match a user in the image
+code_uid = 1000             # Must match the user's UID in the image
+workspace_container_path = "mirror"  # Use same path as host (e.g., /home/user/project)
+
+[network]
+mode = "open"               # Or "restricted" if firewalld is available
+```
+
+**Step 3: Use normally**
+
+```bash
+cd ~/my-project
+coi shell
+# Container runs as bfirestone@container:~/my-project
+# ~/.claude is mounted from host — no credential copying needed
+```
+
+**Key config fields:**
+
+| Field | Description |
+|-------|-------------|
+| `mount_tool_config` | Mount host tool config dir (`~/.claude`) directly instead of copying files. Changes inside the container are reflected on the host. |
+| `code_user` | Username to run as inside the container. Must exist in the image. |
+| `code_uid` | UID of the container user. Should match the host UID for correct file ownership. |
+| `workspace_container_path` | Where to mount the workspace. Set to `"mirror"` to use the same absolute path as the host. |
+
+**When to use mirror mode vs. default mode:**
+- **Default mode** (`coi` image): Best for isolation — AI tools run as the `code` user in `/workspace`, credentials are copied (not shared)
+- **Mirror mode** (custom image): Best for desktop integration — paths match the host, tool config is shared, feels like a local environment
+
 ## Configuration
 
 Config file: `~/.config/coi/config.toml`
 
 ```toml
 [defaults]
-image = "coi"
-persistent = true
-mount_claude_config = true
+image = "coi"               # Container image (default: "coi")
+persistent = true            # Keep container between sessions
+mount_tool_config = false    # Mount tool config dir directly (for mirror mode)
 
 [tool]
 name = "claude"  # AI coding tool to use (currently supports: claude)
@@ -507,7 +562,12 @@ storage_dir = "~/.coi/storage"
 [incus]
 project = "default"
 group = "incus-admin"
-claude_uid = 1000
+code_user = "code"           # Container username (default: "code")
+code_uid = 1000              # Container user UID (default: 1000)
+workspace_container_path = "/workspace"  # Mount point in container ("mirror" = use host path)
+
+[network]
+mode = "restricted"          # Network mode: restricted, allowlist, open
 
 [profiles.rust]
 image = "coi-rust"
