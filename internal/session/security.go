@@ -13,13 +13,13 @@ import (
 // This prevents containers from modifying files that could execute automatically
 // on the host (git hooks, IDE configs, etc.).
 // Returns nil if no paths need protection.
-func SetupSecurityMounts(mgr *container.Manager, workspacePath string, protectedPaths []string, useShift bool) error {
+func SetupSecurityMounts(mgr *container.Manager, workspacePath string, containerWorkspacePath string, protectedPaths []string, useShift bool) error {
 	if len(protectedPaths) == 0 {
 		return nil
 	}
 
 	for _, relPath := range protectedPaths {
-		if err := setupProtectedPath(mgr, workspacePath, relPath, useShift); err != nil {
+		if err := setupProtectedPath(mgr, workspacePath, containerWorkspacePath, relPath, useShift); err != nil {
 			// Log warning but continue with other paths
 			// Some paths may not exist and that's OK
 			if !os.IsNotExist(err) {
@@ -32,9 +32,9 @@ func SetupSecurityMounts(mgr *container.Manager, workspacePath string, protected
 }
 
 // setupProtectedPath mounts a single path as read-only
-func setupProtectedPath(mgr *container.Manager, workspacePath, relPath string, useShift bool) error {
+func setupProtectedPath(mgr *container.Manager, workspacePath, containerWorkspacePath, relPath string, useShift bool) error {
 	hostPath := filepath.Join(workspacePath, relPath)
-	containerPath := filepath.Join("/workspace", relPath)
+	containerPath := filepath.Join(containerWorkspacePath, relPath)
 
 	// For .git paths, check if .git itself is valid FIRST (not a symlink or file)
 	// This must happen before we try to create .git/hooks
@@ -110,8 +110,8 @@ func pathToDeviceName(path string) string {
 // SetupGitHooksMount is a convenience function for backwards compatibility
 // It mounts .git/hooks as read-only for security.
 // Deprecated: Use SetupSecurityMounts with config.Security.GetEffectiveProtectedPaths() instead
-func SetupGitHooksMount(mgr *container.Manager, workspacePath string, useShift bool) error {
-	return SetupSecurityMounts(mgr, workspacePath, []string{".git/hooks"}, useShift)
+func SetupGitHooksMount(mgr *container.Manager, workspacePath string, containerWorkspacePath string, useShift bool) error {
+	return SetupSecurityMounts(mgr, workspacePath, containerWorkspacePath, []string{".git/hooks"}, useShift)
 }
 
 // GetProtectedPathsForLogging returns a human-readable list of protected paths
