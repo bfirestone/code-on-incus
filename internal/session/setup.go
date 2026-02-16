@@ -194,16 +194,17 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 	// 3. Determine execution context
 	// coi image has the claude user pre-configured, so run as that user
-	// Other images don't have this setup, so run as root
+	// Custom images with a configured code_user also run as that user
+	// Other images without a configured user run as root
 	usingCoiImage := image == CoiImage
-	result.RunAsRoot = !usingCoiImage
+	result.RunAsRoot = !usingCoiImage && opts.CodeUser == ""
+	codeUser := opts.CodeUser
+	if codeUser == "" {
+		codeUser = container.CodeUser
+	}
 	if result.RunAsRoot {
 		result.HomeDir = "/root"
 	} else {
-		codeUser := opts.CodeUser
-		if codeUser == "" {
-			codeUser = container.CodeUser
-		}
 		result.HomeDir = "/home/" + codeUser
 	}
 

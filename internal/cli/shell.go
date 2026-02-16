@@ -208,10 +208,16 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		workspaceContainerPath = absWorkspace
 	}
 
+	// Resolve image: CLI flag > config > default
+	resolvedImage := imageName
+	if resolvedImage == "" {
+		resolvedImage = cfg.Defaults.Image
+	}
+
 	// Setup session
 	setupOpts := session.SetupOptions{
 		WorkspacePath:          absWorkspace,
-		Image:                  imageName,
+		Image:                  resolvedImage,
 		Persistent:             persistent,
 		ResumeFromID:           resumeID,
 		Slot:                   slotNum,
