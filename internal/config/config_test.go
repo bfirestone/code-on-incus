@@ -358,3 +358,81 @@ func TestToolConfigMerge(t *testing.T) {
 		})
 	}
 }
+
+func TestDesktopMirrorConfigDefaults(t *testing.T) {
+	cfg := GetDefaultConfig()
+
+	if cfg.Defaults.MountToolConfig {
+		t.Error("Expected default MountToolConfig to be false")
+	}
+
+	if cfg.Incus.WorkspaceContainerPath != "/workspace" {
+		t.Errorf("Expected default WorkspaceContainerPath '/workspace', got '%s'", cfg.Incus.WorkspaceContainerPath)
+	}
+}
+
+func TestDesktopMirrorConfigMerge(t *testing.T) {
+	base := GetDefaultConfig()
+
+	other := &Config{
+		Defaults: DefaultsConfig{
+			MountToolConfig: true,
+		},
+		Incus: IncusConfig{
+			WorkspaceContainerPath: "/home/testuser/projects",
+			CodeUser:               "testuser",
+			CodeUID:                1001,
+		},
+	}
+
+	base.Merge(other)
+
+	if !base.Defaults.MountToolConfig {
+		t.Error("Expected MountToolConfig to be true after merge")
+	}
+
+	if base.Incus.WorkspaceContainerPath != "/home/testuser/projects" {
+		t.Errorf("Expected WorkspaceContainerPath '/home/testuser/projects', got '%s'", base.Incus.WorkspaceContainerPath)
+	}
+
+	if base.Incus.CodeUser != "testuser" {
+		t.Errorf("Expected CodeUser 'testuser', got '%s'", base.Incus.CodeUser)
+	}
+
+	if base.Incus.CodeUID != 1001 {
+		t.Errorf("Expected CodeUID 1001, got %d", base.Incus.CodeUID)
+	}
+}
+
+func TestDesktopMirrorConfigMerge_EmptyWorkspacePath(t *testing.T) {
+	base := GetDefaultConfig()
+
+	other := &Config{
+		Incus: IncusConfig{
+			WorkspaceContainerPath: "",
+		},
+	}
+
+	base.Merge(other)
+
+	// Empty string is the zero value and should NOT override the default
+	if base.Incus.WorkspaceContainerPath != "/workspace" {
+		t.Errorf("Expected WorkspaceContainerPath to remain '/workspace' when other is empty, got '%s'", base.Incus.WorkspaceContainerPath)
+	}
+}
+
+func TestDesktopMirrorConfigMerge_MirrorWorkspacePath(t *testing.T) {
+	base := GetDefaultConfig()
+
+	other := &Config{
+		Incus: IncusConfig{
+			WorkspaceContainerPath: "mirror",
+		},
+	}
+
+	base.Merge(other)
+
+	if base.Incus.WorkspaceContainerPath != "mirror" {
+		t.Errorf("Expected WorkspaceContainerPath 'mirror', got '%s'", base.Incus.WorkspaceContainerPath)
+	}
+}

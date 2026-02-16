@@ -82,32 +82,39 @@ func setupMounts(mgr *container.Manager, mountConfig *MountConfig, useShift bool
 
 // SetupOptions contains options for setting up a session
 type SetupOptions struct {
-	WorkspacePath  string
-	Image          string
-	Persistent     bool // Keep container between sessions (don't delete on cleanup)
-	ResumeFromID   string
-	Slot           int
-	MountConfig    *MountConfig // Multi-mount support
-	SessionsDir    string       // e.g., ~/.coi/sessions-claude
-	CLIConfigPath  string       // e.g., ~/.claude (host CLI config to copy credentials from)
-	Tool           tool.Tool    // AI coding tool being used
-	NetworkConfig  *config.NetworkConfig
-	DisableShift   bool                 // Disable UID shifting (for Colima/Lima environments)
-	LimitsConfig   *config.LimitsConfig // Resource and time limits
-	IncusProject   string               // Incus project name
-	ProtectedPaths []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
-	Logger         func(string)
+	WorkspacePath          string
+	Image                  string
+	Persistent             bool // Keep container between sessions (don't delete on cleanup)
+	ResumeFromID           string
+	Slot                   int
+	MountConfig            *MountConfig // Multi-mount support
+	SessionsDir            string       // e.g., ~/.coi/sessions-claude
+	CLIConfigPath          string       // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool                   tool.Tool    // AI coding tool being used
+	NetworkConfig          *config.NetworkConfig
+	DisableShift           bool                 // Disable UID shifting (for Colima/Lima environments)
+	LimitsConfig           *config.LimitsConfig // Resource and time limits
+	IncusProject           string               // Incus project name
+	ProtectedPaths         []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
+	CodeUser               string               // Container username (default: "code")
+	CodeUID                int                  // Container user UID (default: 1000)
+	WorkspaceContainerPath string               // Mount point for workspace in container (default: "/workspace", "mirror" = use host path)
+	MountToolConfig        bool                 // Mount tool config dir directly instead of copying
+	Logger                 func(string)
 }
 
 // SetupResult contains the result of setup
 type SetupResult struct {
-	ContainerName  string
-	Manager        *container.Manager
-	NetworkManager *network.Manager
-	TimeoutMonitor *limits.TimeoutMonitor
-	HomeDir        string
-	RunAsRoot      bool
-	Image          string
+	ContainerName          string
+	Manager                *container.Manager
+	NetworkManager         *network.Manager
+	TimeoutMonitor         *limits.TimeoutMonitor
+	HomeDir                string
+	RunAsRoot              bool
+	Image                  string
+	CodeUID                int
+	WorkspaceContainerPath string
+	MountToolConfig        bool
 }
 
 // Setup initializes a container for a Claude session
@@ -193,8 +200,28 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	if result.RunAsRoot {
 		result.HomeDir = "/root"
 	} else {
-		result.HomeDir = "/home/" + container.CodeUser
+		codeUser := opts.CodeUser
+		if codeUser == "" {
+			codeUser = container.CodeUser
+		}
+		result.HomeDir = "/home/" + codeUser
 	}
+
+	// Resolve workspace container path
+	result.WorkspaceContainerPath = opts.WorkspaceContainerPath
+	if result.WorkspaceContainerPath == "mirror" {
+		result.WorkspaceContainerPath = opts.WorkspacePath
+	}
+	if result.WorkspaceContainerPath == "" {
+		result.WorkspaceContainerPath = "/workspace"
+	}
+
+	// Resolve CodeUID and MountToolConfig
+	result.CodeUID = opts.CodeUID
+	if result.CodeUID == 0 {
+		result.CodeUID = container.CodeUID
+	}
+	result.MountToolConfig = opts.MountToolConfig
 
 	// 4. Check if container already exists
 	var skipLaunch bool
@@ -241,6 +268,8 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// Compute useShift at function scope so mount operations in later steps can use it
+	useShift := false
 	// 5. Create and configure container (but don't start yet if we need to add devices)
 	// Always launch as non-ephemeral so we can save session data even if container is stopped
 	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete if not --persistent.
@@ -263,7 +292,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			opts.Logger("Auto-detected Colima/Lima environment - disabling UID shifting")
 		}
 
-		useShift := !disableShift
+		useShift = !disableShift
 		isCI := os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true"
 
 		if isCI {
@@ -283,7 +312,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 		// Add disk devices BEFORE starting container
 		opts.Logger(fmt.Sprintf("Adding workspace mount: %s", opts.WorkspacePath))
-		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, "/workspace", useShift, false); err != nil {
+		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, result.WorkspaceContainerPath, useShift, false); err != nil {
 			return nil, fmt.Errorf("failed to add workspace device: %w", err)
 		}
 
@@ -295,7 +324,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		// Protect security-sensitive paths by mounting read-only (security feature)
 		// This must be added after the workspace mount for the overlay to work
 		if len(opts.ProtectedPaths) > 0 {
-			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, opts.ProtectedPaths, useShift); err != nil {
+			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, result.WorkspaceContainerPath, opts.ProtectedPaths, useShift); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
 				// Non-fatal: continue even if protection fails
 			} else {
@@ -351,6 +380,22 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		return nil, err
 	}
 
+	// 6b. Validate that configured user exists in the container image
+	if !result.RunAsRoot {
+		codeUser := opts.CodeUser
+		if codeUser == "" {
+			codeUser = container.CodeUser
+		}
+		checkCmd := fmt.Sprintf("id %s 2>/dev/null", codeUser)
+		if _, err := result.Manager.ExecCommand(checkCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			return nil, fmt.Errorf(
+				"user '%s' does not exist in image '%s' — build a custom image with this user:\n"+
+					"  coi build custom coi-desktop --base images:archlinux --script scripts/build/desktop-arch.sh",
+				codeUser, image,
+			)
+		}
+	}
+
 	// 7. Start timeout monitor if max_duration is configured
 	if opts.LimitsConfig != nil && opts.LimitsConfig.Runtime.MaxDuration != "" {
 		duration, err := limits.ParseDuration(opts.LimitsConfig.Runtime.MaxDuration)
@@ -380,17 +425,18 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 	// 9. When resuming: restore session data if container was recreated, then inject credentials
 	// Skip if tool uses ENV-based auth (no config directory)
-	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
+	// Skip if mount_tool_config is enabled (config is mounted directly from host)
+	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" && !opts.MountToolConfig {
 		// If we launched a new container (not reusing persistent one), restore config from saved session
 		if !skipLaunch && opts.SessionsDir != "" {
-			if err := restoreSessionData(result.Manager, opts.ResumeFromID, result.HomeDir, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
+			if err := restoreSessionData(result.Manager, opts.ResumeFromID, result.HomeDir, opts.SessionsDir, result.CodeUID, opts.Tool, opts.Logger); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Could not restore session data: %v", err))
 			}
 		}
 
 		// Always inject fresh credentials when resuming (whether persistent container or restored session)
 		if opts.CLIConfigPath != "" {
-			if err := injectCredentials(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Tool, opts.Logger); err != nil {
+			if err := injectCredentials(result.Manager, opts.CLIConfigPath, result.HomeDir, result.CodeUID, opts.Tool, opts.Logger); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Could not inject credentials: %v", err))
 			}
 		}
@@ -401,17 +447,37 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		opts.Logger("Reusing existing workspace and mount configurations")
 	}
 
-	// 11. Setup CLI tool config (skip if resuming - config already restored)
+	// 11. Setup CLI tool config
 	// Skip entirely if tool uses ENV-based auth (ConfigDirName returns "")
 	if opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
-		if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
-			// Check if host config directory exists
+		configDirName := opts.Tool.ConfigDirName()
+
+		if opts.MountToolConfig && opts.CLIConfigPath != "" {
+			// Desktop mirror mode: mount host config dir directly
+			opts.Logger(fmt.Sprintf("Mounting %s config directory from host...", opts.Tool.Name()))
+			containerConfigPath := filepath.Join(result.HomeDir, configDirName)
+			if err := result.Manager.MountDisk("tool-config", opts.CLIConfigPath, containerConfigPath, useShift, false); err != nil {
+				return nil, fmt.Errorf("failed to mount tool config: %w", err)
+			}
+			opts.Logger(fmt.Sprintf("Mounted %s -> %s", opts.CLIConfigPath, containerConfigPath))
+
+			// Also mount the state file (e.g., ~/.claude.json)
+			stateFile := fmt.Sprintf(".%s.json", opts.Tool.Name())
+			hostStateFile := filepath.Join(filepath.Dir(opts.CLIConfigPath), stateFile)
+			if _, err := os.Stat(hostStateFile); err == nil {
+				containerStateFile := filepath.Join(result.HomeDir, stateFile)
+				if err := result.Manager.MountDisk("tool-state", hostStateFile, containerStateFile, useShift, false); err != nil {
+					opts.Logger(fmt.Sprintf("Warning: Failed to mount %s: %v", stateFile, err))
+				} else {
+					opts.Logger(fmt.Sprintf("Mounted %s -> %s", hostStateFile, containerStateFile))
+				}
+			}
+		} else if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
+			// Existing behavior: copy essential files
 			if _, err := os.Stat(opts.CLIConfigPath); err == nil {
-				// Copy and inject settings (but only if NOT resuming)
-				// Only run on first launch, not when restarting persistent container
 				if !skipLaunch {
 					opts.Logger(fmt.Sprintf("Setting up %s config...", opts.Tool.Name()))
-					if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Tool, opts.Logger); err != nil {
+					if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, result.CodeUID, opts.Tool, opts.Logger); err != nil {
 						opts.Logger(fmt.Sprintf("Warning: Failed to setup %s config: %v", opts.Tool.Name(), err))
 					}
 				} else {
@@ -425,6 +491,18 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	} else if opts.Tool != nil {
 		opts.Logger(fmt.Sprintf("Tool %s uses ENV-based auth, skipping config setup", opts.Tool.Name()))
+	}
+
+	// Warn if mount_tool_config is enabled but home paths differ
+	if opts.MountToolConfig {
+		hostHome, _ := os.UserHomeDir()
+		if hostHome != result.HomeDir {
+			opts.Logger(fmt.Sprintf(
+				"Warning: mount_tool_config is enabled but host home (%s) differs from container home (%s). "+
+					"Absolute paths in tool config may not resolve correctly. Consider setting code_user to match your host user.",
+				hostHome, result.HomeDir,
+			))
+		}
 	}
 
 	opts.Logger("Container setup complete!")
@@ -458,7 +536,7 @@ func waitForReady(mgr *container.Manager, maxRetries int, logger func(string)) e
 
 // restoreSessionData restores tool config directory from a saved session
 // Used when resuming a non-persistent session (container was deleted and recreated)
-func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir string, t tool.Tool, logger func(string)) error {
+func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir string, codeUID int, t tool.Tool, logger func(string)) error {
 	configDirName := t.ConfigDirName()
 	sourceConfigDir := filepath.Join(sessionsDir, resumeID, configDirName)
 
@@ -480,7 +558,7 @@ func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir s
 	// Fix ownership if running as non-root user
 	if homeDir != "/root" {
 		statePath := destConfigPath
-		if err := mgr.Chown(statePath, container.CodeUID, container.CodeUID); err != nil {
+		if err := mgr.Chown(statePath, codeUID, codeUID); err != nil {
 			return fmt.Errorf("failed to set ownership: %w", err)
 		}
 	}
@@ -491,7 +569,7 @@ func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir s
 
 // injectCredentials copies credentials and essential config from host to container when resuming
 // This ensures fresh authentication while preserving the session conversation history
-func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string, t tool.Tool, logger func(string)) error {
+func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string, codeUID int, t tool.Tool, logger func(string)) error {
 	logger("Injecting fresh credentials and config for session resume...")
 
 	configDirName := t.ConfigDirName()
@@ -509,7 +587,7 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 
 	// Fix ownership if running as non-root user
 	if homeDir != "/root" {
-		if err := mgr.Chown(destCredentials, container.CodeUID, container.CodeUID); err != nil {
+		if err := mgr.Chown(destCredentials, codeUID, codeUID); err != nil {
 			return fmt.Errorf("failed to set credentials ownership: %w", err)
 		}
 	}
@@ -547,7 +625,7 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 
 				// Fix ownership if running as non-root user
 				if homeDir != "/root" {
-					if err := mgr.Chown(stateJsonDest, container.CodeUID, container.CodeUID); err != nil {
+					if err := mgr.Chown(stateJsonDest, codeUID, codeUID); err != nil {
 						logger(fmt.Sprintf("Warning: Failed to set %s ownership: %v", stateConfigFilename, err))
 					}
 				}
@@ -560,7 +638,7 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 }
 
 // setupCLIConfig copies tool config directory and injects sandbox settings
-func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t tool.Tool, logger func(string)) error {
+func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, codeUID int, t tool.Tool, logger func(string)) error {
 	configDirName := t.ConfigDirName()
 	stateDir := filepath.Join(homeDir, configDirName)
 
@@ -677,16 +755,16 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 
 		// Fix ownership if running as non-root user
 		if homeDir != "/root" {
-			logger(fmt.Sprintf("Fixing ownership of %s to %d:%d", stateConfigFilename, container.CodeUID, container.CodeUID))
-			if err := mgr.Chown(stateJsonDest, container.CodeUID, container.CodeUID); err != nil {
+			logger(fmt.Sprintf("Fixing ownership of %s to %d:%d", stateConfigFilename, codeUID, codeUID))
+			if err := mgr.Chown(stateJsonDest, codeUID, codeUID); err != nil {
 				return fmt.Errorf("failed to set %s ownership: %w", stateConfigFilename, err)
 			}
 		}
 
 		// Fix ownership of entire config directory recursively
 		if homeDir != "/root" {
-			logger(fmt.Sprintf("Fixing ownership of entire %s directory to %d:%d", configDirName, container.CodeUID, container.CodeUID))
-			chownCmd := fmt.Sprintf("chown -R %d:%d %s", container.CodeUID, container.CodeUID, stateDir)
+			logger(fmt.Sprintf("Fixing ownership of entire %s directory to %d:%d", configDirName, codeUID, codeUID))
+			chownCmd := fmt.Sprintf("chown -R %d:%d %s", codeUID, codeUID, stateDir)
 			if _, err := mgr.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
 				return fmt.Errorf("failed to set %s directory ownership: %w", configDirName, err)
 			}

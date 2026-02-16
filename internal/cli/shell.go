@@ -192,21 +192,41 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		protectedPaths = cfg.Security.GetEffectiveProtectedPaths()
 	}
 
+	// Resolve code user/uid from config with fallback to constants
+	codeUser := cfg.Incus.CodeUser
+	if codeUser == "" {
+		codeUser = container.CodeUser
+	}
+	codeUID := cfg.Incus.CodeUID
+	if codeUID == 0 {
+		codeUID = container.CodeUID
+	}
+
+	// Resolve workspace container path
+	workspaceContainerPath := cfg.Incus.WorkspaceContainerPath
+	if workspaceContainerPath == "mirror" {
+		workspaceContainerPath = absWorkspace
+	}
+
 	// Setup session
 	setupOpts := session.SetupOptions{
-		WorkspacePath:  absWorkspace,
-		Image:          imageName,
-		Persistent:     persistent,
-		ResumeFromID:   resumeID,
-		Slot:           slotNum,
-		SessionsDir:    sessionsDir,
-		CLIConfigPath:  cliConfigPath,
-		Tool:           toolInstance,
-		NetworkConfig:  &networkConfig,
-		DisableShift:   cfg.Incus.DisableShift,
-		LimitsConfig:   limitsConfig,
-		IncusProject:   cfg.Incus.Project,
-		ProtectedPaths: protectedPaths,
+		WorkspacePath:          absWorkspace,
+		Image:                  imageName,
+		Persistent:             persistent,
+		ResumeFromID:           resumeID,
+		Slot:                   slotNum,
+		SessionsDir:            sessionsDir,
+		CLIConfigPath:          cliConfigPath,
+		Tool:                   toolInstance,
+		NetworkConfig:          &networkConfig,
+		DisableShift:           cfg.Incus.DisableShift,
+		LimitsConfig:           limitsConfig,
+		IncusProject:           cfg.Incus.Project,
+		ProtectedPaths:         protectedPaths,
+		CodeUser:               codeUser,
+		CodeUID:                codeUID,
+		WorkspaceContainerPath: workspaceContainerPath,
+		MountToolConfig:        cfg.Defaults.MountToolConfig,
 	}
 
 	// Parse and validate mount configuration
@@ -243,14 +263,16 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		cleanupOpts := session.CleanupOptions{
-			ContainerName:  result.ContainerName,
-			SessionID:      sessionID,
-			Persistent:     persistent,
-			SessionsDir:    sessionsDir,
-			SaveSession:    true, // Always save session data
-			Workspace:      absWorkspace,
-			Tool:           toolInstance,
-			NetworkManager: result.NetworkManager,
+			ContainerName:   result.ContainerName,
+			SessionID:       sessionID,
+			Persistent:      persistent,
+			SessionsDir:     sessionsDir,
+			SaveSession:     true, // Always save session data
+			Workspace:       absWorkspace,
+			Tool:            toolInstance,
+			NetworkManager:  result.NetworkManager,
+			MountToolConfig: result.MountToolConfig,
+			HomeDir:         result.HomeDir,
 		}
 		if err := session.Cleanup(cleanupOpts); err != nil {
 			fmt.Fprintf(os.Stderr, "Cleanup error: %v\n", err)
@@ -396,7 +418,7 @@ func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restor
 	}
 
 	// Execute in container
-	user := container.CodeUID
+	user := result.CodeUID
 	if result.RunAsRoot {
 		user = 0
 	}
@@ -425,7 +447,7 @@ func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restor
 
 	opts := container.ExecCommandOptions{
 		User:        userPtr,
-		Cwd:         "/workspace",
+		Cwd:         result.WorkspaceContainerPath,
 		Env:         containerEnv,
 		Interactive: true, // Attach stdin/stdout/stderr for interactive session
 	}
@@ -476,7 +498,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	}
 
 	// Build environment variables
-	user := container.CodeUID
+	user := result.CodeUID
 	if result.RunAsRoot {
 		user = 0
 	}
@@ -557,7 +579,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 			attachCmd := fmt.Sprintf("tmux attach -t %s", tmuxSessionName)
 			opts := container.ExecCommandOptions{
 				User:        userPtr,
-				Cwd:         "/workspace",
+				Cwd:         result.WorkspaceContainerPath,
 				Interactive: true,
 			}
 			_, err := result.Manager.ExecCommand(attachCmd, opts)
@@ -572,8 +594,9 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	if detached {
 		// Background mode: create detached session
 		createCmd := fmt.Sprintf(
-			"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
+			"tmux new-session -d -s %s -c %s \"bash -c 'trap : INT; %s %s; exec bash'\"",
 			tmuxSessionName,
+			result.WorkspaceContainerPath,
 			envExports,
 			cliCmd,
 		)
@@ -633,14 +656,15 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		// Step 2: Create detached session if it doesn't exist
 		if checkErr != nil {
 			createCmd := fmt.Sprintf(
-				"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
+				"tmux new-session -d -s %s -c %s \"bash -c 'trap : INT; %s %s; exec bash'\"",
 				tmuxSessionName,
+				result.WorkspaceContainerPath,
 				envExports,
 				cliCmd,
 			)
 			createOpts := container.ExecCommandOptions{
 				User:    userPtr,
-				Cwd:     "/workspace",
+				Cwd:     result.WorkspaceContainerPath,
 				Capture: true,
 			}
 			if _, err := result.Manager.ExecCommand(createCmd, createOpts); err != nil {
@@ -655,7 +679,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		attachCmd := fmt.Sprintf("tmux attach -t %s", tmuxSessionName)
 		attachOpts := container.ExecCommandOptions{
 			User:        userPtr,
-			Cwd:         "/workspace",
+			Cwd:         result.WorkspaceContainerPath,
 			Interactive: true,
 			Env:         containerEnv,
 		}

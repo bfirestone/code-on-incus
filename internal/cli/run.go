@@ -173,11 +173,24 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Resolve code_uid and workspace_container_path from config
+	codeUID := cfg.Incus.CodeUID
+	if codeUID == 0 {
+		codeUID = container.CodeUID
+	}
+	workspaceContainerPath := cfg.Incus.WorkspaceContainerPath
+	if workspaceContainerPath == "mirror" {
+		workspaceContainerPath = absWorkspace
+	}
+	if workspaceContainerPath == "" {
+		workspaceContainerPath = "/workspace"
+	}
+
 	// Mount workspace (skip if restarting existing persistent container)
 	useShift := !cfg.Incus.DisableShift
 	if !wasRestarted {
 		fmt.Fprintf(os.Stderr, "Mounting workspace %s...\n", absWorkspace)
-		if err := mgr.MountDisk("workspace", absWorkspace, "/workspace", useShift, false); err != nil {
+		if err := mgr.MountDisk("workspace", absWorkspace, workspaceContainerPath, useShift, false); err != nil {
 			return fmt.Errorf("failed to mount workspace: %w", err)
 		}
 
@@ -212,7 +225,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		if !writableGitHooks && !cfg.Security.DisableProtection {
 			protectedPaths := cfg.Security.GetEffectiveProtectedPaths()
 			if len(protectedPaths) > 0 {
-				if err := session.SetupSecurityMounts(mgr, absWorkspace, protectedPaths, useShift); err != nil {
+				if err := session.SetupSecurityMounts(mgr, absWorkspace, workspaceContainerPath, protectedPaths, useShift); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
 				} else {
 					// Log which paths were actually protected
@@ -232,8 +245,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Build incus exec command directly with proper args
 	incusArgs := []string{
-		"exec", containerName, "--user", fmt.Sprintf("%d", container.CodeUID),
-		"--group", fmt.Sprintf("%d", container.CodeUID), "--cwd", "/workspace",
+		"exec", containerName, "--user", fmt.Sprintf("%d", codeUID),
+		"--group", fmt.Sprintf("%d", codeUID), "--cwd", workspaceContainerPath,
 	}
 
 	// Add environment variables from -e flags
