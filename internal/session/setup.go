@@ -268,6 +268,8 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// Compute useShift at function scope so mount operations in later steps can use it
+	useShift := false
 	// 5. Create and configure container (but don't start yet if we need to add devices)
 	// Always launch as non-ephemeral so we can save session data even if container is stopped
 	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete if not --persistent.
@@ -290,7 +292,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			opts.Logger("Auto-detected Colima/Lima environment - disabling UID shifting")
 		}
 
-		useShift := !disableShift
+		useShift = !disableShift
 		isCI := os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true"
 
 		if isCI {
@@ -322,7 +324,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		// Protect security-sensitive paths by mounting read-only (security feature)
 		// This must be added after the workspace mount for the overlay to work
 		if len(opts.ProtectedPaths) > 0 {
-			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, opts.ProtectedPaths, useShift); err != nil {
+			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, result.WorkspaceContainerPath, opts.ProtectedPaths, useShift); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
 				// Non-fatal: continue even if protection fails
 			} else {
@@ -407,7 +409,8 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 	// 9. When resuming: restore session data if container was recreated, then inject credentials
 	// Skip if tool uses ENV-based auth (no config directory)
-	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
+	// Skip if mount_tool_config is enabled (config is mounted directly from host)
+	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" && !opts.MountToolConfig {
 		// If we launched a new container (not reusing persistent one), restore config from saved session
 		if !skipLaunch && opts.SessionsDir != "" {
 			if err := restoreSessionData(result.Manager, opts.ResumeFromID, result.HomeDir, opts.SessionsDir, result.CodeUID, opts.Tool, opts.Logger); err != nil {
@@ -428,14 +431,34 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		opts.Logger("Reusing existing workspace and mount configurations")
 	}
 
-	// 11. Setup CLI tool config (skip if resuming - config already restored)
+	// 11. Setup CLI tool config
 	// Skip entirely if tool uses ENV-based auth (ConfigDirName returns "")
 	if opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
-		if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
-			// Check if host config directory exists
+		configDirName := opts.Tool.ConfigDirName()
+
+		if opts.MountToolConfig && opts.CLIConfigPath != "" {
+			// Desktop mirror mode: mount host config dir directly
+			opts.Logger(fmt.Sprintf("Mounting %s config directory from host...", opts.Tool.Name()))
+			containerConfigPath := filepath.Join(result.HomeDir, configDirName)
+			if err := result.Manager.MountDisk("tool-config", opts.CLIConfigPath, containerConfigPath, useShift, false); err != nil {
+				return nil, fmt.Errorf("failed to mount tool config: %w", err)
+			}
+			opts.Logger(fmt.Sprintf("Mounted %s -> %s", opts.CLIConfigPath, containerConfigPath))
+
+			// Also mount the state file (e.g., ~/.claude.json)
+			stateFile := fmt.Sprintf(".%s.json", opts.Tool.Name())
+			hostStateFile := filepath.Join(filepath.Dir(opts.CLIConfigPath), stateFile)
+			if _, err := os.Stat(hostStateFile); err == nil {
+				containerStateFile := filepath.Join(result.HomeDir, stateFile)
+				if err := result.Manager.MountDisk("tool-state", hostStateFile, containerStateFile, useShift, false); err != nil {
+					opts.Logger(fmt.Sprintf("Warning: Failed to mount %s: %v", stateFile, err))
+				} else {
+					opts.Logger(fmt.Sprintf("Mounted %s -> %s", hostStateFile, containerStateFile))
+				}
+			}
+		} else if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
+			// Existing behavior: copy essential files
 			if _, err := os.Stat(opts.CLIConfigPath); err == nil {
-				// Copy and inject settings (but only if NOT resuming)
-				// Only run on first launch, not when restarting persistent container
 				if !skipLaunch {
 					opts.Logger(fmt.Sprintf("Setting up %s config...", opts.Tool.Name()))
 					if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, result.CodeUID, opts.Tool, opts.Logger); err != nil {
@@ -452,6 +475,18 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	} else if opts.Tool != nil {
 		opts.Logger(fmt.Sprintf("Tool %s uses ENV-based auth, skipping config setup", opts.Tool.Name()))
+	}
+
+	// Warn if mount_tool_config is enabled but home paths differ
+	if opts.MountToolConfig {
+		hostHome, _ := os.UserHomeDir()
+		if hostHome != result.HomeDir {
+			opts.Logger(fmt.Sprintf(
+				"Warning: mount_tool_config is enabled but host home (%s) differs from container home (%s). "+
+					"Absolute paths in tool config may not resolve correctly. Consider setting code_user to match your host user.",
+				hostHome, result.HomeDir,
+			))
+		}
 	}
 
 	opts.Logger("Container setup complete!")
