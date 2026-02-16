@@ -15,15 +15,17 @@ import (
 
 // CleanupOptions contains options for cleaning up a session
 type CleanupOptions struct {
-	ContainerName  string
-	SessionID      string    // COI session ID for saving tool config data
-	Persistent     bool      // If true, stop but don't delete container
-	SessionsDir    string    // e.g., ~/.coi/sessions-claude
-	SaveSession    bool      // Whether to save tool config directory
-	Workspace      string    // Workspace directory path
-	Tool           tool.Tool // AI coding tool being used
-	NetworkManager *network.Manager
-	Logger         func(string)
+	ContainerName   string
+	SessionID       string    // COI session ID for saving tool config data
+	Persistent      bool      // If true, stop but don't delete container
+	SessionsDir     string    // e.g., ~/.coi/sessions-claude
+	SaveSession     bool      // Whether to save tool config directory
+	Workspace       string    // Workspace directory path
+	Tool            tool.Tool // AI coding tool being used
+	NetworkManager  *network.Manager
+	MountToolConfig bool   // When true, skip session save (config is directly mounted)
+	HomeDir         string // Container home dir (avoids recomputing)
+	Logger          func(string)
 }
 
 // Cleanup stops and deletes a container, optionally saving session data
@@ -52,8 +54,8 @@ func Cleanup(opts CleanupOptions) error {
 	// Always save session data if container exists (works even from stopped containers)
 	// This ensures --resume works regardless of how the user exited (including sudo shutdown 0)
 	// Skip if tool uses ENV-based auth (no config directory to save)
-	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
-		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
+	if opts.SaveSession && !opts.MountToolConfig && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
+		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.Workspace, opts.SessionsDir, opts.HomeDir, opts.Tool, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
 		}
 	}
@@ -125,12 +127,11 @@ func Cleanup(opts CleanupOptions) error {
 }
 
 // saveSessionData saves the tool config directory from the container
-func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, workspace string, sessionsDir string, t tool.Tool, logger func(string)) error {
-	// Determine home directory
-	// For coi images, we always use /home/code
-	// For other images, we use /root
-	// Since we currently only support coi images, always use /home/code
-	homeDir := "/home/" + container.CodeUser
+func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, workspace string, sessionsDir string, homeDir string, t tool.Tool, logger func(string)) error {
+	// Use provided home directory, fall back to default
+	if homeDir == "" {
+		homeDir = "/home/" + container.CodeUser
+	}
 
 	configDirName := t.ConfigDirName()
 	stateDir := filepath.Join(homeDir, configDirName)
